@@ -49,14 +49,12 @@ int main(int argc, char *argv[]) {
 
   PPL ppl(&g, &bwdGraph);
 
-  ppl.paths = loadPathFile(outputPathFile);
+  ppl.chainDecomposition();
   ppl.sortPaths();
-
-  // ppl.chainDecomposition();
 
   if (showstats) ppl.showPathStats();
 
-  // if (outputPathFile != "") saveToFile(ppl.paths, outputPathFile);
+  if (outputPathFile != "") saveToFile(ppl.paths, outputPathFile);
 
   ppl.run();
 

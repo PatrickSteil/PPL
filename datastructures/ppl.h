@@ -10,6 +10,8 @@
 #include <ranges>
 #include <stack>
 #include <vector>
+#include <numeric>
+#include <cmath>
 
 #include "bfs_tools.h"
 #include "chain.h"
@@ -70,8 +72,6 @@ class PPL {
       seen.mark(root);
       queue.push(root);
 
-      const auto& rootLabels = labels[dir][root];
-
       while (!queue.isEmpty()) {
         const Vertex u = queue.pop();
 
@@ -86,7 +86,11 @@ class PPL {
           if (seen.isMarked(w)) continue;
           seen.mark(w);
 
-          if (query(rootLabels, labels[!dir][w])) continue;
+          if (dir == FWD) {
+            if (query(labels[FWD][root], labels[BWD][w])) continue;
+          } else {
+            if (query(labels[FWD][w], labels[BWD][root])) continue;
+          }
           queue.push(w);
         }
       }
@@ -234,8 +238,6 @@ class PPL {
         paths.back().push_back(v);
       }
     }
-
-    sortPaths();
   }
 
   void sortPaths() {
@@ -249,13 +251,12 @@ class PPL {
     }
 
     std::sort(paths.begin(), paths.end(), [&](const std::vector<Vertex>& pathA, const std::vector<Vertex>& pathB) {
-        std::size_t sumA = 0, sumB = 0;
-        for (Vertex v : pathA) {
-            sumA += value[v];
-        }
-        for (Vertex v : pathB) {
-            sumB += value[v];
-        }
+        const std::size_t sumA = std::accumulate(pathA.begin(), pathA.end(), 0ULL, [&](std::size_t acc, Vertex v) {
+          return acc + value[v];
+        });
+        const std::size_t sumB = std::accumulate(pathB.begin(), pathB.end(), 0ULL, [&](std::size_t acc, Vertex v) {
+          return acc + value[v];
+        });
         return sumA > sumB;
     });
   }
@@ -281,29 +282,42 @@ class PPL {
 
   void showPathStats() {
     if (paths.empty()) {
-      std::cout << "No paths available.\n";
-      return;
+        std::cout << "No paths available.\n";
+        return;
     }
 
     std::size_t totalPaths = paths.size();
     std::size_t minLength = std::numeric_limits<std::size_t>::max();
     std::size_t maxLength = 0;
     std::size_t totalLength = 0;
+    // std::vector<std::size_t> lengths;
+    // lengths.reserve(totalPaths);
 
     for (const auto& path : paths) {
-      std::size_t length = path.size();
-      minLength = std::min(minLength, length);
-      maxLength = std::max(maxLength, length);
-      totalLength += length;
+        std::size_t length = path.size();
+        // lengths.push_back(length);
+        minLength = std::min(minLength, length);
+        maxLength = std::max(maxLength, length);
+        totalLength += length;
     }
 
     double avgLength = static_cast<double>(totalLength) / totalPaths;
+
+    // std::sort(lengths.begin(), lengths.end());
 
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
     std::cout << "  Min Length:     " << minLength << "\n";
     std::cout << "  Max Length:     " << maxLength << "\n";
     std::cout << "  Average Length: " << avgLength << "\n";
+
+    // std::cout << "  Percentiles (path length):\n";
+    // for (int percentile = 0; percentile <= 100; percentile += 10) {
+    //     std::size_t index = static_cast<std::size_t>(
+    //         std::round((percentile / 100.0) * (lengths.size() - 1))
+    //     );
+    //     std::cout << "    " << percentile << "th percentile: " << lengths[index] << "\n";
+    // }
   }
 
   void computePaths() {
