@@ -7,11 +7,12 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
+#include <numeric>
 #include <ranges>
 #include <stack>
+#include <thread>
 #include <vector>
-#include <numeric>
-#include <cmath>
 
 #include "bfs_tools.h"
 #include "chain.h"
@@ -49,6 +50,8 @@ class PPL {
   void showStats() { showLabelStats(labels); }
 
   void clear() {
+    StatusLog log("Clear Datastructures");
+
     assert(labels[FWD].size() == labels[BWD].size());
     assert(labels[FWD].size() == graphs[FWD]->numVertices());
     assert(labels[FWD].size() == graphs[BWD]->numVertices());
@@ -66,9 +69,7 @@ class PPL {
                                      const std::uint32_t path_id,
                                      const std::uint32_t position) -> void {
       assert(!seen.isMarked(root));
-
       std::size_t oldRead = queue.read;
-
       seen.mark(root);
       queue.push(root);
 
@@ -82,15 +83,11 @@ class PPL {
             PREFETCH(&graphs[dir]->toVertex[i + 4]);
           }
           const Vertex w = graphs[dir]->toVertex[i];
-
           if (seen.isMarked(w)) continue;
           seen.mark(w);
 
-          if (dir == FWD) {
-            if (query(labels[FWD][root], labels[BWD][w])) continue;
-          } else {
-            if (query(labels[FWD][w], labels[BWD][root])) continue;
-          }
+          if (dir == FWD && query(labels[FWD][root], labels[BWD][w])) continue;
+          if (dir == BWD && query(labels[FWD][w], labels[BWD][root])) continue;
           queue.push(w);
         }
       }
@@ -102,39 +99,33 @@ class PPL {
 
       for (; oldRead < newRead; ++oldRead) {
         if (oldRead + 4 < newRead) {
-          PREFETCH(&labels[!dir][queue.data[oldRead+4]]);
+          PREFETCH(&labels[!dir][queue.data[oldRead + 4]]);
         }
-
         Vertex other = queue.data[oldRead];
-
         assert(other < labels[!dir].size());
         labels[!dir][other].emplace_back(path_id, position);
         labels[!dir][other].sort();
       }
     };
 
+    auto processChain = [&](const DIRECTION dir, const std::size_t p,
+                            auto range) -> void {
+      seen.reset();
+      queue.reset();
+
+      for (std::size_t i : range) {
+        Vertex root = paths[p][i];
+        processVertexFromPath(dir, root, p, i);
+      }
+    };
+
     for (std::uint32_t p = 0; p < paths.size(); ++p) {
-      const auto& path = paths[p];
       const std::size_t start = 0;
-      const std::size_t end = path.size();
+      const std::size_t end = paths[p].size();
 
-      seen.reset();
-      queue.reset();
-
-      for (std::size_t i : std::views::iota(start, end) | std::ranges::views::reverse) {
-        Vertex root = path[i];
-
-        processVertexFromPath(FWD, root, p, i);
-      }
-
-      seen.reset();
-      queue.reset();
-
-      for (std::size_t i : std::views::iota(start, end)) {
-        Vertex root = path[i];
-
-        processVertexFromPath(BWD, root, p, i);
-      }
+      processChain(FWD, p,
+                   std::views::iota(start, end) | std::ranges::views::reverse);
+      processChain(BWD, p, std::views::iota(start, end));
     }
   }
 
@@ -250,15 +241,17 @@ class PPL {
       value[v] = (graphs[FWD]->degree(v) + 1) * (graphs[BWD]->degree(v) + 1);
     }
 
-    std::sort(paths.begin(), paths.end(), [&](const std::vector<Vertex>& pathA, const std::vector<Vertex>& pathB) {
-        const std::size_t sumA = std::accumulate(pathA.begin(), pathA.end(), 0ULL, [&](std::size_t acc, Vertex v) {
-          return acc + value[v];
-        });
-        const std::size_t sumB = std::accumulate(pathB.begin(), pathB.end(), 0ULL, [&](std::size_t acc, Vertex v) {
-          return acc + value[v];
-        });
-        return sumA > sumB;
-    });
+    std::sort(paths.begin(), paths.end(),
+              [&](const std::vector<Vertex>& pathA,
+                  const std::vector<Vertex>& pathB) {
+                const std::size_t sumA = std::accumulate(
+                    pathA.begin(), pathA.end(), 0ULL,
+                    [&](std::size_t acc, Vertex v) { return acc + value[v]; });
+                const std::size_t sumB = std::accumulate(
+                    pathB.begin(), pathB.end(), 0ULL,
+                    [&](std::size_t acc, Vertex v) { return acc + value[v]; });
+                return sumA > sumB;
+              });
   }
 
   bool verifyPathDecomposition(
@@ -282,8 +275,8 @@ class PPL {
 
   void showPathStats() {
     if (paths.empty()) {
-        std::cout << "No paths available.\n";
-        return;
+      std::cout << "No paths available.\n";
+      return;
     }
 
     std::size_t totalPaths = paths.size();
@@ -294,11 +287,11 @@ class PPL {
     // lengths.reserve(totalPaths);
 
     for (const auto& path : paths) {
-        std::size_t length = path.size();
-        // lengths.push_back(length);
-        minLength = std::min(minLength, length);
-        maxLength = std::max(maxLength, length);
-        totalLength += length;
+      std::size_t length = path.size();
+      // lengths.push_back(length);
+      minLength = std::min(minLength, length);
+      maxLength = std::max(maxLength, length);
+      totalLength += length;
     }
 
     double avgLength = static_cast<double>(totalLength) / totalPaths;
@@ -316,7 +309,8 @@ class PPL {
     //     std::size_t index = static_cast<std::size_t>(
     //         std::round((percentile / 100.0) * (lengths.size() - 1))
     //     );
-    //     std::cout << "    " << percentile << "th percentile: " << lengths[index] << "\n";
+    //     std::cout << "    " << percentile << "th percentile: " <<
+    //     lengths[index] << "\n";
     // }
   }
 
@@ -358,12 +352,12 @@ class PPL {
 
           const std::size_t new_sum = sum[u] + value[v];
           bool update = (new_sum > sum[v]);
-          sum[v] = branchlessConditional(update, new_sum, sum[v]);
-          parent[v] = branchlessConditional(update, u, parent[v]);
+          sum[v] = update ? new_sum : sum[v];
+          parent[v] = update ? u : parent[v];
 
           bool new_best = (sum[v] > best_val);
-          best_val = branchlessConditional(new_best, sum[v], best_val);
-          best_v = branchlessConditional(new_best, v, best_v);
+          best_val = new_best ? sum[v] : best_val;
+          best_v = new_best ? v : best_v;
         });
       }
 
@@ -374,7 +368,7 @@ class PPL {
         for (Vertex cur = best_v; cur != noVertex; cur = parent[cur]) {
           path.push_back(cur);
         }
-        std::reverse(path.begin(), path.end());
+        // std::reverse(path.begin(), path.end());
         for (auto node : path) {
           already_chosen[node] = true;
         }
@@ -382,7 +376,7 @@ class PPL {
       }
     }
 
-    std::cout << "\n[Info] Nr. Paths: " << paths.size() << std::endl;
+    // std::cout << "\n[Info] Nr. Paths: " << paths.size() << std::endl;
 
     // // Output all the paths found.
     // for (auto& path : paths) {

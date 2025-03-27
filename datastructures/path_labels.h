@@ -1,5 +1,11 @@
 #pragma once
 
+#ifdef __GNUC__
+#define PREFETCH(addr) __builtin_prefetch(addr)
+#else
+#define PREFETCH(addr)
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -81,19 +87,41 @@ struct PathLabel {
 };
 
 // **** Query ****
+// bool query(const PathLabel& from, const PathLabel& to) {
+//   std::size_t i = 0, j = 0;
+
+//   assert(std::is_sorted(from.hubs.begin(), from.hubs.end()));
+//   assert(std::is_sorted(to.hubs.begin(), to.hubs.end()));
+
+//   while (i < from.size() && j < to.size()) {
+//     if (from[i].isReachable(to[j])) {
+//       return true;
+//     } else if (from[i] < to[j]) {
+//       ++i;
+//     } else {
+//       ++j;
+//     }
+//   }
+//   return false;
+// }
+
 bool query(const PathLabel& from, const PathLabel& to) {
   std::size_t i = 0, j = 0;
-
-  assert(std::is_sorted(from.hubs.begin(), from.hubs.end()));
-  assert(std::is_sorted(to.hubs.begin(), to.hubs.end()));
-
   while (i < from.size() && j < to.size()) {
-    if (from[i].isReachable(to[j])) {
-      return true;
-    } else if (from[i] < to[j]) {
+    const auto& srcHub = from.hubs[i];
+    const auto& tgtHub = to.hubs[j];
+
+    // Compare path ids to sync the two labels
+    if (srcHub.getPath() < tgtHub.getPath()) {
       ++i;
-    } else {
+    } else if (srcHub.getPath() > tgtHub.getPath()) {
       ++j;
+    } else {
+      if (srcHub.getPathPos() <= tgtHub.getPathPos()) {
+        return true;
+      } else {
+        ++j;
+      }
     }
   }
   return false;
@@ -111,18 +139,20 @@ void benchmark_pathlabels(std::array<std::vector<PathLabel>, 2>& labels,
   auto queries =
       generateRandomQueries<Vertex>(numQueries, 0, labels[FWD].size());
   long double totalTime(0);
+  std::size_t counter(0);
 
   for (std::pair<Vertex, Vertex>& paar : queries) {
     auto t1 = high_resolution_clock::now();
-    query(labels[FWD][paar.first], labels[BWD][paar.second]);
+    counter += query(labels[FWD][paar.first], labels[BWD][paar.second]);
     auto t2 = high_resolution_clock::now();
     duration<double, std::nano> nano_double = t2 - t1;
     totalTime += nano_double.count();
   }
 
   std::cout << "The " << numQueries << " random queries took in total "
-            << totalTime << " [ms] and on average "
-            << (double)(totalTime / numQueries) << " [ns]!\n";
+            << totalTime << " [ns] and on average "
+            << (double)(totalTime / numQueries) << " [ns]! Counter: " << counter
+            << "\n";
 }
 
 // **** Stats ****
@@ -132,8 +162,8 @@ std::size_t computeTotalBytes(
   for (const auto& labelSet : labels) {
     for (const auto& label : labelSet) {
       totalBytes += sizeof(PathLabel);
-      totalBytes += label.size() * sizeof(std::uint32_t);
-      totalBytes += label.size() * sizeof(std::uint32_t);
+      totalBytes += label.size() * sizeof(decltype(PathHub{}.path_id));
+      totalBytes += label.size() * sizeof(decltype(PathHub{}.path_pos));
     }
   }
   return totalBytes;
@@ -251,24 +281,25 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string& fileName) {
   return paths;
 }
 
-void saveToFile(const std::vector<std::vector<Vertex>>& paths, const std::string& fileName) {
-    std::ofstream outFile(fileName);
-    if (!outFile.is_open()) {
-        std::cerr << "Error: Unable to open file " << fileName << " for writing.\n";
-        return;
+void saveToFile(const std::vector<std::vector<Vertex>>& paths,
+                const std::string& fileName) {
+  std::ofstream outFile(fileName);
+  if (!outFile.is_open()) {
+    std::cerr << "Error: Unable to open file " << fileName << " for writing.\n";
+    return;
+  }
+
+  // Write header line: 'P' followed by the number of paths.
+  outFile << "P " << paths.size() << "\n";
+
+  // Write each path on a new line.
+  for (const auto& path : paths) {
+    std::ostringstream lineStream;
+    for (Vertex v : path) {
+      lineStream << v << " ";
     }
-    
-    // Write header line: 'P' followed by the number of paths.
-    outFile << "P " << paths.size() << "\n";
-    
-    // Write each path on a new line.
-    for (const auto& path : paths) {
-        std::ostringstream lineStream;
-        for (Vertex v : path) {
-            lineStream << v << " ";
-        }
-        outFile << lineStream.str() << "\n";
-    }
-    
-    outFile.close();
+    outFile << lineStream.str() << "\n";
+  }
+
+  outFile.close();
 }
