@@ -65,41 +65,6 @@ The output file contains hub labels for all vertices in the graph. Each vertex h
 
 **Example Output:**
 ```
-Reading graph from DIMACS ... done [2627ms]
-Forward Graph Statistics:
-  Number of vertices: 2527390
-  Number of edges:    7955735
-  Min degree:         0
-  Max degree:         15
-  Average degree:     3.14781
-Reversing Graph ... done [103ms]
-Initializing data structures ... done [191ms]
-Computing HLs ... done [39661ms]
-Computing hub permutation ... done [2450ms]
-Sorting labels ... done [592ms]
-Forward Labels:
-  Min Size:     1
-  Max Size:     240
-  Avg Size:     78.5583
-Backward Labels:
-  Min Size:     1
-  Max Size:     227
-  Avg Size:     69.6271
-FWD # count:    198547362
-BWD # count:    175974860
-Both # count:   374522222
-Total memory usage: 2188.12 MB
-10000 random queries: total time 180436 ms, avg time 18.0436 ns
-```
-
-### Sequential PLL Version (Single Threaded)
-
-```bash
-./PLL -s -i ../data/kvv.dimacs -c -b
-```
-
-**Example Output:**
-```
 Reading graph from dimacs ... done [406ms]
 Graph Statistics:
   Number of vertices:            186068
@@ -136,4 +101,4 @@ The 100000 random queries took in total 4.14783e+07 [ns] and on average 414.783 
 
 This project is based on:
 - [**"Fast and Scalable Reachability Queries on Graphs
-by Pruned Labeling with Landmarks and Paths"** – Akiba‡ et al.](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=a3d5e5d2fae76af242e40e35989237a8c3e6385f)
+by Pruned Labeling with Landmarks and Paths"** – Akiba et al.](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=a3d5e5d2fae76af242e40e35989237a8c3e6385f)
