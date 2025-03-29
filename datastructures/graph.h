@@ -48,6 +48,14 @@ struct Graph {
       : adjArray(std::move(other.adjArray)),
         toVertex(std::move(other.toVertex)) {}
 
+  Graph &operator=(Graph &&other) noexcept {
+    if (this != &other) {
+      adjArray = std::move(other.adjArray);
+      toVertex = std::move(other.toVertex);
+    }
+    return *this;
+  }
+
   bool isValid(const Vertex v) const { return v < numVertices(); }
 
   std::size_t numVertices() const { return adjArray.size() - 1; }
@@ -337,8 +345,6 @@ struct Graph {
   }
 
   Graph reverseGraph() const {
-    StatusLog log("Reversing Graph");
-
     Graph reversed;
     reversed.adjArray = adjArray;
     reversed.toVertex = toVertex;
@@ -374,7 +380,7 @@ struct Graph {
   }
 
   void showStats() const {
-    if (numVertices() == 0) {
+    if (numEdges() == 0) {
       std::cout << "Graph is empty.\n";
       return;
     }

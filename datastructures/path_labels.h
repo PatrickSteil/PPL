@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -84,30 +85,131 @@ struct PathLabel {
   auto end() const { return hubs.end(); }
 
   void clear() { hubs.clear(); }
+
+  template <typename Func>
+  auto doForAllHubs(Func&& func) {
+    for (auto hub : hubs) {
+      func(hub);
+    }
+  }
 };
 
-// **** Query ****
-// bool query(const PathLabel& from, const PathLabel& to) {
-//   std::size_t i = 0, j = 0;
+class ThreadSafePathLabel {
+ public:
+  std::vector<PathHub> hubs;
+  mutable std::mutex m;
 
-//   assert(std::is_sorted(from.hubs.begin(), from.hubs.end()));
-//   assert(std::is_sorted(to.hubs.begin(), to.hubs.end()));
+  ThreadSafePathLabel() = default;
 
-//   while (i < from.size() && j < to.size()) {
-//     if (from[i].isReachable(to[j])) {
-//       return true;
-//     } else if (from[i] < to[j]) {
-//       ++i;
-//     } else {
-//       ++j;
-//     }
-//   }
-//   return false;
-// }
+  explicit ThreadSafePathLabel(const std::vector<PathHub>& init_hubs)
+      : hubs(init_hubs) {}
+
+  explicit ThreadSafePathLabel(std::vector<PathHub>&& init_hubs)
+      : hubs(std::move(init_hubs)) {}
+
+  ThreadSafePathLabel(const ThreadSafePathLabel& other) {
+    std::lock_guard<std::mutex> lock(other.m);
+    hubs = other.hubs;
+  }
+
+  ThreadSafePathLabel& operator=(const ThreadSafePathLabel& other) {
+    if (this != &other) {
+      std::scoped_lock lock(m, other.m);
+      hubs = other.hubs;
+    }
+    return *this;
+  }
+
+  ThreadSafePathLabel(ThreadSafePathLabel&& other) noexcept {
+    std::lock_guard<std::mutex> lock(other.m);
+    hubs = std::move(other.hubs);
+  }
+
+  ThreadSafePathLabel& operator=(ThreadSafePathLabel&& other) noexcept {
+    if (this != &other) {
+      std::scoped_lock lock(m, other.m);
+      hubs = std::move(other.hubs);
+    }
+    return *this;
+  }
+
+  PathHub get(size_t index) const {
+    std::lock_guard<std::mutex> lock(m);
+    assert(index < hubs.size() && "Index out of bounds in ThreadSafePathLabel");
+    return hubs[index];
+  }
+
+  size_t size() const {
+    std::lock_guard<std::mutex> lock(m);
+    return hubs.size();
+  }
+
+  bool empty() const {
+    std::lock_guard<std::mutex> lock(m);
+    return hubs.empty();
+  }
+
+  void push_back(const PathHub& label) {
+    std::lock_guard<std::mutex> lock(m);
+    hubs.push_back(label);
+  }
+
+  void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
+    std::lock_guard<std::mutex> lock(m);
+    hubs.emplace_back(path_id, path_pos);
+  }
+
+  void sort() {
+    std::lock_guard<std::mutex> lock(m);
+    std::sort(hubs.begin(), hubs.end());
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lock(m);
+    hubs.clear();
+  }
+
+  std::vector<PathHub> get_snapshot() const {
+    std::lock_guard<std::mutex> lock(m);
+    return hubs;
+  }
+
+  template <typename Func>
+  auto doForAllHubs(Func&& func) {
+    std::lock_guard<std::mutex> lock(m);
+    for (auto hub : hubs) {
+      func(hub);
+    }
+  }
+};
 
 bool query(const PathLabel& from, const PathLabel& to) {
   std::size_t i = 0, j = 0;
   while (i < from.size() && j < to.size()) {
+    const auto& srcHub = from[i];
+    const auto& tgtHub = to[j];
+
+    // Compare path ids to sync the two labels
+    if (srcHub.getPath() < tgtHub.getPath()) {
+      ++i;
+    } else if (srcHub.getPath() > tgtHub.getPath()) {
+      ++j;
+    } else {
+      if (srcHub.getPathPos() <= tgtHub.getPathPos()) {
+        return true;
+      } else {
+        ++j;
+      }
+    }
+  }
+  return false;
+}
+
+bool query(const ThreadSafePathLabel& from, const ThreadSafePathLabel& to) {
+  std::scoped_lock lock(from.m, to.m);
+
+  std::size_t i = 0, j = 0;
+  while (i < from.hubs.size() && j < to.hubs.size()) {
     const auto& srcHub = from.hubs[i];
     const auto& tgtHub = to.hubs[j];
 
@@ -127,7 +229,8 @@ bool query(const PathLabel& from, const PathLabel& to) {
   return false;
 }
 
-void benchmark_pathlabels(std::array<std::vector<PathLabel>, 2>& labels,
+template <class PATHLABEL_TYPE = PathLabel>
+void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
                           const std::size_t numQueries = 100000) {
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -156,12 +259,13 @@ void benchmark_pathlabels(std::array<std::vector<PathLabel>, 2>& labels,
 }
 
 // **** Stats ****
+template <class PATHLABEL_TYPE = PathLabel>
 std::size_t computeTotalBytes(
-    const std::array<std::vector<PathLabel>, 2>& labels) {
+    const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
   std::size_t totalBytes = 0;
   for (const auto& labelSet : labels) {
     for (const auto& label : labelSet) {
-      totalBytes += sizeof(PathLabel);
+      totalBytes += sizeof(PATHLABEL_TYPE);
       totalBytes += label.size() * sizeof(decltype(PathHub{}.path_id));
       totalBytes += label.size() * sizeof(decltype(PathHub{}.path_pos));
     }
@@ -169,8 +273,9 @@ std::size_t computeTotalBytes(
   return totalBytes;
 }
 
-void showLabelStats(const std::array<std::vector<PathLabel>, 2>& labels) {
-  auto computeStats = [](const std::vector<PathLabel>& currentLabels) {
+template <class PATHLABEL_TYPE = PathLabel>
+void showLabelStats(const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
+  auto computeStats = [](const std::vector<PATHLABEL_TYPE>& currentLabels) {
     std::size_t minSize = std::numeric_limits<std::size_t>::max();
     std::size_t maxSize = 0, totalSize = 0;
     for (const auto& label : currentLabels) {
@@ -208,7 +313,8 @@ void showLabelStats(const std::array<std::vector<PathLabel>, 2>& labels) {
 }
 
 /// **** IO ****
-void saveToFile(std::array<std::vector<PathLabel>, 2>& labels,
+template <class PATHLABEL_TYPE = PathLabel>
+void saveToFile(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
                 const std::string& fileName) {
   std::ofstream outFile(fileName);
   if (!outFile.is_open()) {
@@ -221,15 +327,15 @@ void saveToFile(std::array<std::vector<PathLabel>, 2>& labels,
 
   for (std::size_t v = 0; v < N; ++v) {
     outFile << "o " << v;
-    for (const auto& hub : labels[FWD][v]) {
+    labels[FWD][v].doForAllHubs([&](const auto& hub) {
       outFile << " " << hub.getPath() << " " << hub.getPathPos();
-    }
+    });
     outFile << "\n";
 
     outFile << "i " << v;
-    for (const auto& hub : labels[BWD][v]) {
+    labels[BWD][v].doForAllHubs([&](const auto& hub) {
       outFile << " " << hub.getPath() << " " << hub.getPathPos();
-    }
+    });
     outFile << "\n";
   }
 

@@ -22,6 +22,9 @@ endif()
 add_executable(PPL main.cpp)
 target_include_directories(PPL PUBLIC datastructures)
 
+add_executable(TT_PPL timetable_main.cpp)
+target_include_directories(TT_PPL PUBLIC datastructures)
+
 enable_testing()
 find_package(GTest)
 

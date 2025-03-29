@@ -23,28 +23,36 @@
 class PPL {
  public:
   std::array<Graph*, 2> graphs;
-  std::array<std::vector<PathLabel>, 2> labels;
+  std::array<std::vector<ThreadSafePathLabel>, 2> labels;
 
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
 
-  bfs::FixedSizedQueue<Vertex> queue;
-  bfs::GenerationChecker<> seen;
+  std::array<bfs::FixedSizedQueue<Vertex>, 2> queue;
+  std::array<bfs::GenerationChecker<>, 2> seen;
 
   std::vector<std::vector<Vertex>> paths;
 
-  PPL(Graph* fwdGraph, Graph* bwdGraph)
+  const int numThreads;
+
+  PPL(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
-        labels{std::vector<PathLabel>(fwdGraph->numVertices()),
-               std::vector<PathLabel>(fwdGraph->numVertices())},
+        labels{std::vector<ThreadSafePathLabel>(fwdGraph->numVertices()),
+               std::vector<ThreadSafePathLabel>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
-        queue(graphs[FWD]->numVertices()),
-        seen(graphs[FWD]->numVertices()),
-        paths() {
-    for (std::size_t r = 0; r < rank.size(); ++r) {
-      rank[topoSorter[r]] = r;
-    }
+        queue{bfs::FixedSizedQueue<Vertex>(fwdGraph->numVertices()),
+              bfs::FixedSizedQueue<Vertex>(fwdGraph->numVertices())},
+        seen{bfs::GenerationChecker<>(fwdGraph->numVertices()),
+             bfs::GenerationChecker<>(fwdGraph->numVertices())},
+        paths(),
+        numThreads(numberOfThreads) {
+    parallelFor(
+        0, rank.size(),
+        [&](const std::size_t, const std::size_t r) {
+          rank[topoSorter[r]] = r;
+        },
+        numThreads);
   };
 
   void showStats() { showLabelStats(labels); }
@@ -56,10 +64,13 @@ class PPL {
     assert(labels[FWD].size() == graphs[FWD]->numVertices());
     assert(labels[FWD].size() == graphs[BWD]->numVertices());
 
-    for (std::size_t v = 0; v < labels[FWD].size(); ++v) {
-      labels[FWD][v].clear();
-      labels[BWD][v].clear();
-    }
+    parallelFor(
+        0, labels[FWD].size(),
+        [&](const std::size_t, const std::size_t v) {
+          labels[FWD][v].clear();
+          labels[BWD][v].clear();
+        },
+        numThreads);
   }
 
   void run() {
@@ -68,13 +79,13 @@ class PPL {
     auto processVertexFromPath = [&](const DIRECTION dir, const Vertex root,
                                      const std::uint32_t path_id,
                                      const std::uint32_t position) -> void {
-      assert(!seen.isMarked(root));
-      std::size_t oldRead = queue.read;
-      seen.mark(root);
-      queue.push(root);
+      assert(!seen[dir].isMarked(root));
+      std::size_t oldRead = queue[dir].read;
+      seen[dir].mark(root);
+      queue[dir].push(root);
 
-      while (!queue.isEmpty()) {
-        const Vertex u = queue.pop();
+      while (!queue[dir].isEmpty()) {
+        const Vertex u = queue[dir].pop();
 
         for (std::size_t i = graphs[dir]->beginEdge(u),
                          end = graphs[dir]->endEdge(u);
@@ -83,25 +94,22 @@ class PPL {
             PREFETCH(&graphs[dir]->toVertex[i + 4]);
           }
           const Vertex w = graphs[dir]->toVertex[i];
-          if (seen.isMarked(w)) continue;
-          seen.mark(w);
+          if (seen[dir].isMarked(w)) continue;
+          seen[dir].mark(w);
 
           if (dir == FWD && query(labels[FWD][root], labels[BWD][w])) continue;
           if (dir == BWD && query(labels[FWD][w], labels[BWD][root])) continue;
-          queue.push(w);
+          queue[dir].push(w);
         }
       }
 
-      std::size_t newRead = queue.read;
+      std::size_t newRead = queue[dir].read;
       assert(oldRead <= newRead);
-      assert(oldRead < queue.data.size());
-      assert(newRead <= queue.data.size());
+      assert(oldRead < queue[dir].data.size());
+      assert(newRead <= queue[dir].data.size());
 
       for (; oldRead < newRead; ++oldRead) {
-        if (oldRead + 4 < newRead) {
-          PREFETCH(&labels[!dir][queue.data[oldRead + 4]]);
-        }
-        Vertex other = queue.data[oldRead];
+        Vertex other = queue[dir].data[oldRead];
         assert(other < labels[!dir].size());
         labels[!dir][other].emplace_back(path_id, position);
         labels[!dir][other].sort();
@@ -110,8 +118,8 @@ class PPL {
 
     auto processChain = [&](const DIRECTION dir, const std::size_t p,
                             auto range) -> void {
-      seen.reset();
-      queue.reset();
+      seen[dir].reset();
+      queue[dir].reset();
 
       for (std::size_t i : range) {
         Vertex root = paths[p][i];
@@ -123,9 +131,18 @@ class PPL {
       const std::size_t start = 0;
       const std::size_t end = paths[p].size();
 
-      processChain(FWD, p,
-                   std::views::iota(start, end) | std::ranges::views::reverse);
-      processChain(BWD, p, std::views::iota(start, end));
+      std::thread fwdThread(
+          processChain, FWD, p,
+          std::views::iota(start, end) | std::ranges::views::reverse);
+      std::thread bwdThread(processChain, BWD, p, std::views::iota(start, end));
+
+      fwdThread.join();
+      bwdThread.join();
+
+      // processChain(FWD, p,
+      //              std::views::iota(start, end) |
+      //              std::ranges::views::reverse);
+      // processChain(BWD, p, std::views::iota(start, end));
     }
   }
 
@@ -236,10 +253,14 @@ class PPL {
 
     const std::size_t n = graphs[FWD]->numVertices();
 
-    std::vector<std::size_t> value(n, 0);
-    for (std::size_t v = 0; v < n; ++v) {
-      value[v] = (graphs[FWD]->degree(v) + 1) * (graphs[BWD]->degree(v) + 1);
-    }
+    std::vector<std::size_t> value(n);
+    parallelFor(
+        0, n,
+        [&](const std::size_t, const std::size_t v) {
+          value[v] =
+              (graphs[FWD]->degree(v) + 1) * (graphs[BWD]->degree(v) + 1);
+        },
+        numThreads);
 
     std::sort(paths.begin(), paths.end(),
               [&](const std::vector<Vertex>& pathA,
@@ -280,38 +301,37 @@ class PPL {
     }
 
     std::size_t totalPaths = paths.size();
-    std::size_t minLength = std::numeric_limits<std::size_t>::max();
-    std::size_t maxLength = 0;
-    std::size_t totalLength = 0;
-    // std::vector<std::size_t> lengths;
-    // lengths.reserve(totalPaths);
+    std::atomic<std::size_t> minLength{std::numeric_limits<std::size_t>::max()};
+    std::atomic<std::size_t> maxLength{0};
+    std::atomic<std::size_t> totalLength{0};
 
-    for (const auto& path : paths) {
-      std::size_t length = path.size();
-      // lengths.push_back(length);
-      minLength = std::min(minLength, length);
-      maxLength = std::max(maxLength, length);
-      totalLength += length;
-    }
+    parallelFor(
+        0, paths.size(),
+        [&](const std::size_t, const std::size_t i) {
+          const auto& path = paths[i];
+          std::size_t length = path.size();
 
-    double avgLength = static_cast<double>(totalLength) / totalPaths;
+          std::size_t currentMin = minLength.load();
+          while (length < currentMin &&
+                 !minLength.compare_exchange_weak(currentMin, length)) {
+          }
 
-    // std::sort(lengths.begin(), lengths.end());
+          std::size_t currentMax = maxLength.load();
+          while (length > currentMax &&
+                 !maxLength.compare_exchange_weak(currentMax, length)) {
+          }
+
+          totalLength.fetch_add(length, std::memory_order_relaxed);
+        },
+        numThreads);
+
+    double avgLength = static_cast<double>(totalLength.load()) / totalPaths;
 
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
-    std::cout << "  Min Length:     " << minLength << "\n";
-    std::cout << "  Max Length:     " << maxLength << "\n";
+    std::cout << "  Min Length:     " << minLength.load() << "\n";
+    std::cout << "  Max Length:     " << maxLength.load() << "\n";
     std::cout << "  Average Length: " << avgLength << "\n";
-
-    // std::cout << "  Percentiles (path length):\n";
-    // for (int percentile = 0; percentile <= 100; percentile += 10) {
-    //     std::size_t index = static_cast<std::size_t>(
-    //         std::round((percentile / 100.0) * (lengths.size() - 1))
-    //     );
-    //     std::cout << "    " << percentile << "th percentile: " <<
-    //     lengths[index] << "\n";
-    // }
   }
 
   void computePaths() {
