@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "../external/csv.h"
@@ -127,17 +128,17 @@ struct TimeTable {
     TripID tripId = events[eventId].tripId;
     StopPos stopIndex = events[eventId].stopIndex;
 
-    // For forward direction, relax the event at the next stop.
     if (dir == FWD && stopIndex + 1 < trips[tripId].size()) {
-      // from departure vertex of current event to arrival vertex of next event.
       function((eventId << 1) + 1, trips[tripId][stopIndex + 1] << 1);
     }
-    // For backward direction, relax the event at the previous stop.
     if (dir == BWD && stopIndex > 0) {
-      // from arrival vertex of current event to arrival vertex of previous
-      // event.
       function((eventId << 1), trips[tripId][stopIndex - 1] << 1);
     }
+  }
+
+  bool lessOrEqual(const Vertex left, const Vertex right) const {
+    return std::forward_as_tuple(getTime(left), left) <=
+           std::forward_as_tuple(getTime(right), right);
   }
 
   // Build Time Expanded Graph (TEGraph)
@@ -151,20 +152,14 @@ struct TimeTable {
     std::atomic<std::size_t> numberOfTEDEdges{0};
 
     // 1. Stop-transfer-chain:
-    // For each stop, add an edge from each vertex to its successor in the
-    // sorted order.
     parallelFor(
         0, numberOfStops(),
         [&](const std::size_t, const std::size_t s) {
           const auto& vecVertices = eventsOfStop[s];
-
-          assert(std::is_sorted(
-              vecVertices.begin(), vecVertices.end(),
-              [&](const auto left, const auto right) {
-                return std::forward_as_tuple(getTime(left), left) <=
-                       std::forward_as_tuple(getTime(right), right);
-              }));
-
+          assert(std::is_sorted(vecVertices.begin(), vecVertices.end(),
+                                [&](const auto left, const auto right) {
+                                  return lessOrEqual(left, right);
+                                }));
           for (std::size_t i = 1; i < vecVertices.size(); ++i) {
             Vertex from = vecVertices[i - 1];
             Vertex to = vecVertices[i];
@@ -175,8 +170,6 @@ struct TimeTable {
         numThreads);
 
     // 2. Trip-chain edges:
-    // For each trip, connect the departure vertex of one event to the arrival
-    // vertex of the next.
     parallelFor(
         0, numberOfTrips(),
         [&](const std::size_t, const std::size_t t) {
@@ -184,9 +177,7 @@ struct TimeTable {
           for (std::size_t i = 1; i < tripEvents.size(); ++i) {
             Vertex from = (tripEvents[i - 1] << 1) + 1;
             Vertex to = (tripEvents[i] << 1);
-
-            assert(std::forward_as_tuple(getTime(from), from) <=
-                   std::forward_as_tuple(getTime(to), to));
+            assert(lessOrEqual(from, to));
             ted[from].push_back(to);
             numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
           }
@@ -194,23 +185,27 @@ struct TimeTable {
         numThreads);
 
     // 3. Footpath edges:
-    // For each stop, consider each arrival vertex.
-    // Then, for every footpath (from s to some toStop), add an edge from that
-    // arrival vertex to the first arrival vertex at toStop that is reachable.
+    // Create a vector of hashmaps, one per thread.
+    std::vector<std::unordered_map<StopID, Vertex>> threadLocalMap(numThreads);
+
+    // For each stop, iterate over its events in reverse order.
     parallelFor(
         0, numberOfStops(),
-        [&](const std::size_t, const std::size_t s) {
-          for (Vertex v : eventsOfStop[s]) {
+        [&](const std::size_t threadId, const std::size_t s) {
+          auto& localMap = threadLocalMap[threadId];
+          localMap.clear();
+
+          const auto& vecVertices = eventsOfStop[s];
+          for (Vertex v : vecVertices | std::views::reverse) {
             if (isArrivalVertex(v)) {
-              // Use the arrival time from the vertex.
               Time arrTime = getTime(v);
               relaxFootpathEdges(s, [&](const StopID, const StopID toStop,
                                         const Time duration) {
                 assert(s != toStop);
                 Time arrivalThreshold = arrTime + duration;
-                const auto& vecVertices = eventsOfStop[toStop];
+                const auto& toStopVertices = eventsOfStop[toStop];
                 Vertex targetVertex = noVertex;
-                for (Vertex x : vecVertices) {
+                for (Vertex x : toStopVertices) {
                   if (isArrivalVertex(x) &&
                       std::forward_as_tuple(getTime(x), x) >=
                           std::forward_as_tuple(arrivalThreshold, v)) {
@@ -219,9 +214,10 @@ struct TimeTable {
                   }
                 }
                 if (targetVertex != noVertex) {
-                  assert(std::forward_as_tuple(getTime(v), v) <=
-                         std::forward_as_tuple(getTime(targetVertex),
-                                               targetVertex));
+                  if (localMap.contains(toStop)) {
+                    return;
+                  }
+                  localMap[toStop] = targetVertex;
                   ted[v].push_back(targetVertex);
                   numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
                 }
@@ -231,12 +227,12 @@ struct TimeTable {
         },
         numThreads);
 
+    // Convert the temporary graph into an edge list.
     std::vector<std::pair<Vertex, Vertex>> edges;
     edges.reserve(numberOfTEDEdges.load(std::memory_order_relaxed));
     for (Vertex from = 0; from < ted.size(); ++from) {
       for (Vertex to : ted[from]) {
-        assert(std::forward_as_tuple(getTime(from), from) <=
-               std::forward_as_tuple(getTime(to), to));
+        assert(lessOrEqual(from, to));
         edges.emplace_back(from, to);
       }
     }

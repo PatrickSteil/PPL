@@ -189,7 +189,6 @@ bool query(const PathLabel& from, const PathLabel& to) {
     const auto& srcHub = from[i];
     const auto& tgtHub = to[j];
 
-    // Compare path ids to sync the two labels
     if (srcHub.getPath() < tgtHub.getPath()) {
       ++i;
     } else if (srcHub.getPath() > tgtHub.getPath()) {

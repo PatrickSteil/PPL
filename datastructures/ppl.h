@@ -20,10 +20,11 @@
 #include "path_labels.h"
 #include "topological_sort.h"
 
+template <typename PATHLABEL_TYPE = PathLabel>
 class PPL {
  public:
   std::array<Graph*, 2> graphs;
-  std::array<std::vector<ThreadSafePathLabel>, 2> labels;
+  std::array<std::vector<PATHLABEL_TYPE>, 2> labels;
 
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
@@ -37,8 +38,8 @@ class PPL {
 
   PPL(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
-        labels{std::vector<ThreadSafePathLabel>(fwdGraph->numVertices()),
-               std::vector<ThreadSafePathLabel>(fwdGraph->numVertices())},
+        labels{std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices()),
+               std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
         queue{bfs::FixedSizedQueue<Vertex>(fwdGraph->numVertices()),
@@ -109,6 +110,9 @@ class PPL {
       assert(newRead <= queue[dir].data.size());
 
       for (; oldRead < newRead; ++oldRead) {
+        if (oldRead + 4 < newRead) {
+          PREFETCH(&labels[!dir][queue[dir].data[oldRead + 4]]);
+        }
         Vertex other = queue[dir].data[oldRead];
         assert(other < labels[!dir].size());
         labels[!dir][other].emplace_back(path_id, position);
@@ -131,18 +135,9 @@ class PPL {
       const std::size_t start = 0;
       const std::size_t end = paths[p].size();
 
-      std::thread fwdThread(
-          processChain, FWD, p,
-          std::views::iota(start, end) | std::ranges::views::reverse);
-      std::thread bwdThread(processChain, BWD, p, std::views::iota(start, end));
-
-      fwdThread.join();
-      bwdThread.join();
-
-      // processChain(FWD, p,
-      //              std::views::iota(start, end) |
-      //              std::ranges::views::reverse);
-      // processChain(BWD, p, std::views::iota(start, end));
+      processChain(FWD, p,
+                   std::views::iota(start, end) | std::ranges::views::reverse);
+      processChain(BWD, p, std::views::iota(start, end));
     }
   }
 
