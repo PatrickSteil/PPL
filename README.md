@@ -10,6 +10,42 @@ This repository implements a hub labeling algorithm for efficient reachability q
 ### Timetable Reading:
 For the timetable variant, the timetable is read from a specified directory. This timetable contains details about stops, trips, events, and footpaths.
 
+**Timetable Format**:
+The timetable data is organized into several CSV files, each serving a specific role in describing trips, stops, and transfer options. The code expects the following files (or a subset, as some are optional):
+
+1. trips.csv
+*Columns*:
+- TripId: A unique identifier for the trip.
+- StopIndex: The order in which stops are visited during the trip.
+- StopId: A unique identifier for the stop where the event occurs.
+- ArrivalTime: The scheduled arrival time at the stop.
+- DepartureTime: The scheduled departure time from the stop.
+
+*Notes*:
+Each row represents an event (with both an arrival and a departure) at a stop. Events are later grouped into trips based on TripId and ordered by StopIndex.
+
+2. footpaths.csv
+*Columns*:
+- FromStopId: The identifier of the originating stop.
+- ToStopId: The identifier of the destination stop.
+- TravelTime: The duration required to walk from the origin to the destination.
+
+*Notes*:
+These connections allow the algorithm to model transfers where a traveler may walk from one stop to another.
+
+3. stops.csv (Optional)
+*Columns*:
+- StopId: The unique identifier for the stop.
+- MinChangeTime: The minimum time needed to change services at that stop.
+
+4. transfers.csv (Optional)
+*Columns*:
+- FromVertex: A vertex identifier representing the origin event (or connection point).
+- ToVertex: A vertex identifier representing the destination event.
+
+*Notes*:
+This file is used to construct a graph that models transfer opportunities between different events.
+
 ### Time Expanded Graph Construction:
 From the timetable data, a time expanded graph is built. Each event (arrival and departure) becomes a vertex in the graph. The graph is then augmented with:
 
