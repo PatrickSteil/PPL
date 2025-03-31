@@ -23,6 +23,9 @@ void configure_parser(cli::Parser &parser) {
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
+  parser.set_optional<bool>("c", "contract_graph", false,
+                            "Contract vertices in the TEG which have the same "
+                            "time at the same stop.");
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
@@ -37,11 +40,15 @@ int main(int argc, char *argv[]) {
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string outputFileName = parser.get<std::string>("o");
   const int numThreads = parser.get<int>("t");
+  const bool contract = parser.get<bool>("c");
   const bool showstats = parser.get<bool>("s");
   const bool run_benchmark = parser.get<bool>("b");
 
   TimeTable tt(inputFileName, numThreads);
+
   tt.buildTEGraph();
+
+  if (contract) tt.contract();
 
   if (showstats) tt.showStats();
 

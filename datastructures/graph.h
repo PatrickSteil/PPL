@@ -138,23 +138,43 @@ struct Graph {
 
   void buildFromEdgeList(std::vector<std::pair<Vertex, Vertex>> &edgeList,
                          std::size_t numVertices) {
-    adjArray.resize(numVertices + 1, 0);
+    std::vector<std::size_t> newAdjArray(numVertices + 1, 0);
+    std::vector<Vertex> newToVertex;
 
     sortAndRemoveDuplicates(edgeList);
 
+    assert(std::is_sorted(edgeList.begin(), edgeList.end(),
+                          [](const auto &a, const auto &b) {
+                            return (a.first < b.first) ||
+                                   (a.first == b.first && a.second < b.second);
+                          }));
+
     for (const auto &[u, v] : edgeList) {
-      ++adjArray[u + 1];
+      assert(u < newAdjArray.size());
+      assert(v < newAdjArray.size());
+      assert(u < numVertices);
+      assert(v < numVertices);
+
+      ++newAdjArray[u + 1];
     }
 
-    for (std::size_t i = 1; i < adjArray.size(); ++i) {
-      adjArray[i] += adjArray[i - 1];
+    for (std::size_t i = 1; i < newAdjArray.size(); ++i) {
+      newAdjArray[i] += newAdjArray[i - 1];
     }
 
-    toVertex.resize(edgeList.size());
-    std::vector<std::size_t> offset = adjArray;
+    assert(newAdjArray.back() == edgeList.size());
+
+    newToVertex.resize(edgeList.size());
+    std::vector<std::size_t> offset = newAdjArray;
     for (const auto &[u, v] : edgeList) {
-      toVertex[offset[u]++] = v;
+      assert(u < offset.size());
+      assert(offset[u] < newAdjArray[u + 1]);
+      assert(offset[u] < newToVertex.size());
+      newToVertex[offset[u]++] = v;
     }
+
+    adjArray = std::move(newAdjArray);
+    toVertex = std::move(newToVertex);
   }
 
   void readFromEdgeList(const std::string &fileName) {

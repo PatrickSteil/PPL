@@ -25,8 +25,6 @@
 #include "types.h"
 #include "utils.h"
 
-// TODO contract events at the same time
-
 struct Event {
   TripID tripId;
   StopPos stopIndex;
@@ -56,6 +54,7 @@ struct TimeTable {
   std::vector<std::vector<Vertex>> eventsOfStop;
   std::vector<std::vector<std::pair<StopID, Time>>> footpaths;
   std::vector<Event> events;
+  std::vector<Time> times;
   std::array<Graph, 2> transferGraphs;
 
   const int numThreads;
@@ -78,10 +77,17 @@ struct TimeTable {
   // Returns the associated time for the vertex (arrival time for arrival
   // vertex, departure time for departure vertex).
   Time getTime(const Vertex v) const {
-    EventID eventId = v >> 1;
-    assert(eventId < events.size());
-    return isArrivalVertex(v) ? events[eventId].arrivalTime
-                              : events[eventId].departureTime;
+    assert(v < times.size());
+    return times[v];
+  }
+
+  // Applies a function to relax all footpath edges for a given stop.
+  template <typename Func>
+  void relaxFootpathEdges(const StopID stopId, Func&& function) {
+    assert(stopId < numberOfStops());
+    for (auto& p : footpaths[stopId]) {
+      function(stopId, p.first, p.second);
+    }
   }
 
   // Returns the number of stops.
@@ -99,39 +105,9 @@ struct TimeTable {
     eventsOfStop.clear();
     footpaths.clear();
     events.clear();
+    times.clear();
     transferGraphs[FWD].clear();
     transferGraphs[BWD].clear();
-  }
-
-  // Applies a function to relax all transfer edges for a given vertex.
-  template <typename Func>
-  void relaxTransferEdges(const DIRECTION dir, const Vertex vertex,
-                          Func&& function) {
-    transferGraphs[dir].relaxAllEdges(vertex, function);
-  }
-
-  // Applies a function to relax all footpath edges for a given stop.
-  template <typename Func>
-  void relaxFootpathEdges(const StopID stopId, Func&& function) {
-    assert(stopId < numberOfStops());
-    for (auto& p : footpaths[stopId]) {
-      function(stopId, p.first, p.second);
-    }
-  }
-
-  // Applies a function to relax the next event in the same trip.
-  template <typename Func>
-  void relaxNextEventInTrip(const DIRECTION dir, const EventID eventId,
-                            Func&& function) {
-    TripID tripId = events[eventId].tripId;
-    StopPos stopIndex = events[eventId].stopIndex;
-
-    if (dir == FWD && stopIndex + 1 < trips[tripId].size()) {
-      function((eventId << 1) + 1, trips[tripId][stopIndex + 1] << 1);
-    }
-    if (dir == BWD && stopIndex > 0) {
-      function((eventId << 1), trips[tripId][stopIndex - 1] << 1);
-    }
   }
 
   bool lessOrEqual(const Vertex left, const Vertex right) const {
@@ -153,6 +129,74 @@ struct TimeTable {
     } else {
       return noVertex;
     }
+  }
+
+  void contract() {
+    StatusLog log("Compress Data");
+
+    const std::size_t oldNumVertices = numberOfEvents() * 2;
+    std::vector<Vertex> oldToNewMapping(oldNumVertices, 0);
+    std::size_t newId = 0;
+
+    for (StopID s = 0; s < numberOfStops(); ++s) {
+      auto& vec = eventsOfStop[s];
+      if (vec.empty()) continue;
+
+      oldToNewMapping[vec[0]] = newId++;
+      Time prevTime = getTime(vec[0]);
+
+      for (std::size_t i = 1; i < vec.size(); ++i) {
+        Vertex v = vec[i];
+        Time currTime = getTime(v);
+        if (currTime == prevTime) {
+          oldToNewMapping[v] = oldToNewMapping[vec[i - 1]];
+        } else {
+          oldToNewMapping[v] = newId++;
+          prevTime = currTime;
+        }
+      }
+    }
+
+    std::vector<Time> newTimes(newId, infinity);
+    for (Vertex u = 0; u < oldNumVertices; ++u) {
+      Vertex new_v = oldToNewMapping[u];
+      if (newTimes[new_v] == infinity) {
+        newTimes[new_v] = times[u];
+      } else {
+        assert(newTimes[new_v] == times[u]);
+      }
+    }
+    times = std::move(newTimes);
+
+    std::vector<std::pair<Vertex, Vertex>> newEdges;
+    newEdges.reserve(transferGraphs[FWD].numEdges());
+
+    transferGraphs[FWD].doForAllEdges([&](const Vertex u, const Vertex v) {
+      Vertex fromVertex = oldToNewMapping[u];
+      Vertex toVertex = oldToNewMapping[v];
+
+      if (fromVertex == toVertex) return;
+      if (std::forward_as_tuple(times[fromVertex], fromVertex) >
+          std::forward_as_tuple(times[toVertex], toVertex)) {
+        std::swap(fromVertex, toVertex);
+      }
+      newEdges.emplace_back(fromVertex, toVertex);
+    });
+
+    sortAndRemoveDuplicates(newEdges);
+
+    transferGraphs[FWD].buildFromEdgeList(newEdges, newId);
+    transferGraphs[BWD] = transferGraphs[FWD].reverseGraph();
+
+    for (StopID s = 0; s < numberOfStops(); ++s) {
+      auto& vec = eventsOfStop[s];
+      for (auto& v : vec) {
+        v = oldToNewMapping[v];
+      }
+      sortAndRemoveDuplicates(vec);
+    }
+
+    sortEventsOfStops();
   }
 
   // Build Time Expanded Graph (TEGraph)
@@ -279,7 +323,6 @@ struct TimeTable {
     clear();
 
     readEventsFromCSV(fileName + "/trips.csv");
-    // readMinChangeTimesFromCSV(fileName + "/stops.csv");
     readFootpathsFromCSV(fileName + "/footpaths.csv");
     // readEventGraphFromCSV(fileName + "/transfers.csv");
 
@@ -302,10 +345,13 @@ struct TimeTable {
     std::size_t numberOfTrips = 0;
 
     events.reserve(10000);
+    times.reserve(10000);
 
     while (in.read_row(tripId, stopIndex, stopId, arrivalTime, departureTime)) {
       events.emplace_back(tripId, stopIndex, stopId, arrivalTime,
                           departureTime);
+      times.emplace_back(arrivalTime);
+      times.emplace_back(departureTime);
 
       numberOfStops = std::max(numberOfStops, static_cast<std::size_t>(stopId));
       numberOfTrips = std::max(numberOfTrips, static_cast<std::size_t>(tripId));
@@ -326,37 +372,6 @@ struct TimeTable {
       eventsOfStop[event.stopId].push_back(static_cast<Vertex>((i << 1) + 1));
       trips[event.tripId].push_back(static_cast<EventID>(i));
     }
-  }
-
-  // Reads stop-specific data from a CSV file and adjusts departure times.
-  void readMinChangeTimesFromCSV(const std::string& fileName) {
-    io::CSVReader<2, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
-        in(fileName);
-    in.read_header(io::ignore_extra_column, "StopId", "MinChangeTime");
-
-    StopID stopId;
-    int minChangeTime;
-
-    std::vector<int> times(numberOfStops());
-
-    while (in.read_row(stopId, minChangeTime)) {
-      assert(stopId < eventsOfStop.size());
-      times[stopId] = minChangeTime;
-    }
-
-    parallelFor(
-        0, numberOfStops(),
-        [&](const std::size_t, const std::size_t i) {
-          // Adjust departure times for each event at stop i.
-          for (Vertex v : eventsOfStop[i]) {
-            // Only adjust if the vertex represents a departure.
-            if (isDepartureVertex(v)) {
-              EventID eventId = v >> 1;
-              events[eventId].departureTime += times[i];
-            }
-          }
-        },
-        numThreads);
   }
 
   // Reads footpath data.
