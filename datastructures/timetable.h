@@ -1,3 +1,8 @@
+/*
+ * Licensed under MIT License.
+ * Author: Patrick Steil
+ */
+
 #pragma once
 
 #include <algorithm>
@@ -23,19 +28,14 @@
 // TODO contract events at the same time
 
 struct Event {
-  EventID stopEventId;
-  LineID lineId;
   TripID tripId;
   StopPos stopIndex;
   StopID stopId;
   Time arrivalTime;
   Time departureTime;
 
-  Event(EventID se, LineID li, TripID ti, StopPos si, StopID st, Time at,
-        Time dt)
-      : stopEventId(se),
-        lineId(li),
-        tripId(ti),
+  Event(TripID ti, StopPos si, StopID st, Time at, Time dt)
+      : tripId(ti),
         stopIndex(si),
         stopId(st),
         arrivalTime(at),
@@ -45,16 +45,14 @@ struct Event {
 
   // Comparison operator based on arrival and departure times.
   auto operator<=>(const Event& other) const {
-    return std::tie(arrivalTime, departureTime, lineId, tripId, stopIndex) <=>
-           std::tie(other.arrivalTime, other.departureTime, other.lineId,
-                    other.tripId, other.stopIndex);
+    return std::tie(arrivalTime, departureTime, tripId, stopIndex) <=>
+           std::tie(other.arrivalTime, other.departureTime, other.tripId,
+                    other.stopIndex);
   }
 };
 
 struct TimeTable {
-  // Trips still store event IDs.
   std::vector<std::vector<EventID>> trips;
-  // For each stop we now store vertices (each event gives two vertices).
   std::vector<std::vector<Vertex>> eventsOfStop;
   std::vector<std::vector<std::pair<StopID, Time>>> footpaths;
   std::vector<Event> events;
@@ -72,10 +70,10 @@ struct TimeTable {
 
   // Helper methods for TEGraph vertices.
   // Returns true if the vertex represents a departure event.
-  bool isDepartureVertex(const Vertex v) const { return (v & 1) == 1; }
+  bool isDepartureVertex(const Vertex v) const { return (v & 1); }
 
   // Returns true if the vertex represents an arrival event.
-  bool isArrivalVertex(const Vertex v) const { return (v & 1) == 0; }
+  bool isArrivalVertex(const Vertex v) const { return !isDepartureVertex(v); }
 
   // Returns the associated time for the vertex (arrival time for arrival
   // vertex, departure time for departure vertex).
@@ -141,17 +139,32 @@ struct TimeTable {
            std::forward_as_tuple(getTime(right), right);
   }
 
+  Vertex findEarliestEvent(const StopID stop, Time arrivalThreshold,
+                           const Vertex v) {
+    auto it = std::lower_bound(
+        eventsOfStop[stop].begin(), eventsOfStop[stop].end(), arrivalThreshold,
+        [&](Vertex vertex, Time time) {
+          return std::forward_as_tuple(getTime(vertex), vertex) <=
+                 std::forward_as_tuple(time, v);
+        });
+
+    if (it != eventsOfStop[stop].end()) {
+      return *it;
+    } else {
+      return noVertex;
+    }
+  }
+
   // Build Time Expanded Graph (TEGraph)
   void buildTEGraph() {
     StatusLog log("Build Time Expanded Graph");
-    sortEventsOfStops();
 
     const std::size_t numTEVertices = numberOfEvents() * 2;
-    // Build temporary TEGraph as an adjacency list.
-    std::vector<std::vector<Vertex>> ted(numTEVertices);
-    std::atomic<std::size_t> numberOfTEDEdges{0};
 
-    // 1. Stop-transfer-chain:
+    std::vector<std::vector<Vertex>> ted(numTEVertices);
+    std::atomic_size_t numberOfTEDEdges{0};
+
+    // 1. Waiting arcs
     parallelFor(
         0, numberOfStops(),
         [&](const std::size_t, const std::size_t s) {
@@ -169,7 +182,7 @@ struct TimeTable {
         },
         numThreads);
 
-    // 2. Trip-chain edges:
+    // 2. Connection arcs
     parallelFor(
         0, numberOfTrips(),
         [&](const std::size_t, const std::size_t t) {
@@ -177,15 +190,37 @@ struct TimeTable {
           for (std::size_t i = 1; i < tripEvents.size(); ++i) {
             Vertex from = (tripEvents[i - 1] << 1) + 1;
             Vertex to = (tripEvents[i] << 1);
+
+            assert(isDepartureVertex(from));
+            assert(isArrivalVertex(to));
             assert(lessOrEqual(from, to));
+
             ted[from].push_back(to);
             numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
           }
         },
         numThreads);
 
-    // 3. Footpath edges:
+    // 3. Trip Arr to Dep arcs
+    parallelFor(
+        0, numberOfEvents(),
+        [&](const std::size_t, const std::size_t v) {
+          Vertex from = (v << 1);
+          Vertex to = (v << 1) + 1;
+
+          assert(isArrivalVertex(from));
+          assert(isDepartureVertex(to));
+          assert(lessOrEqual(from, to));
+
+          ted[from].push_back(to);
+          numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
+        },
+        numThreads);
+
+    // 4. Footpath edges:
     // Create a vector of hashmaps, one per thread.
+    // used to skip adding unnecessary footpath edges from earlier events to the
+    // same event if
     std::vector<std::unordered_map<StopID, Vertex>> threadLocalMap(numThreads);
 
     // For each stop, iterate over its events in reverse order.
@@ -197,37 +232,29 @@ struct TimeTable {
 
           const auto& vecVertices = eventsOfStop[s];
           for (Vertex v : vecVertices | std::views::reverse) {
-            if (isArrivalVertex(v)) {
-              Time arrTime = getTime(v);
-              relaxFootpathEdges(s, [&](const StopID, const StopID toStop,
-                                        const Time duration) {
-                assert(s != toStop);
-                Time arrivalThreshold = arrTime + duration;
-                const auto& toStopVertices = eventsOfStop[toStop];
-                Vertex targetVertex = noVertex;
-                for (Vertex x : toStopVertices) {
-                  if (isArrivalVertex(x) &&
-                      std::forward_as_tuple(getTime(x), x) >=
-                          std::forward_as_tuple(arrivalThreshold, v)) {
-                    targetVertex = x;
-                    break;
+            Time arrTime = getTime(v);
+            relaxFootpathEdges(
+                s, [&](const StopID, const StopID toStop, const Time duration) {
+                  assert(s != toStop);
+                  Time arrivalThreshold = arrTime + duration;
+
+                  Vertex targetVertex =
+                      findEarliestEvent(toStop, arrivalThreshold, v);
+
+                  if (targetVertex != noVertex) {
+                    if (localMap.contains(toStop) &&
+                        localMap[toStop] == targetVertex) {
+                      return;
+                    }
+                    localMap[toStop] = targetVertex;
+                    ted[v].push_back(targetVertex);
+                    numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
                   }
-                }
-                if (targetVertex != noVertex) {
-                  if (localMap.contains(toStop)) {
-                    return;
-                  }
-                  localMap[toStop] = targetVertex;
-                  ted[v].push_back(targetVertex);
-                  numberOfTEDEdges.fetch_add(1, std::memory_order_relaxed);
-                }
-              });
-            }
+                });
           }
         },
         numThreads);
 
-    // Convert the temporary graph into an edge list.
     std::vector<std::pair<Vertex, Vertex>> edges;
     edges.reserve(numberOfTEDEdges.load(std::memory_order_relaxed));
     for (Vertex from = 0; from < ted.size(); ++from) {
@@ -261,12 +288,11 @@ struct TimeTable {
 
   // Reads events from a CSV file and organizes them into trips and stops.
   void readEventsFromCSV(const std::string& fileName) {
-    io::CSVReader<7, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
+    io::CSVReader<5, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
         in(fileName);
-    in.read_header(io::ignore_extra_column, "StopEventId", "LineId", "TripId",
-                   "StopIndex", "StopId", "ArrivalTime", "DepartureTime");
-    EventID stopEventId;
-    LineID lineId;
+    in.read_header(io::ignore_extra_column, "TripId", "StopIndex", "StopId",
+                   "ArrivalTime", "DepartureTime");
+
     TripID tripId;
     StopPos stopIndex;
     StopID stopId;
@@ -275,16 +301,12 @@ struct TimeTable {
     std::size_t numberOfStops = 0;
     std::size_t numberOfTrips = 0;
 
-    // Reserve memory for events.
     events.reserve(10000);
 
-    // Read each row from the CSV and create Event objects.
-    while (in.read_row(stopEventId, lineId, tripId, stopIndex, stopId,
-                       arrivalTime, departureTime)) {
-      events.emplace_back(stopEventId, lineId, tripId, stopIndex, stopId,
-                          arrivalTime, departureTime);
+    while (in.read_row(tripId, stopIndex, stopId, arrivalTime, departureTime)) {
+      events.emplace_back(tripId, stopIndex, stopId, arrivalTime,
+                          departureTime);
 
-      // Keep track of the maximum stop and trip IDs.
       numberOfStops = std::max(numberOfStops, static_cast<std::size_t>(stopId));
       numberOfTrips = std::max(numberOfTrips, static_cast<std::size_t>(tripId));
     }
@@ -293,15 +315,13 @@ struct TimeTable {
     numberOfTrips++;
 
     trips.resize(numberOfTrips);
-    // Note: eventsOfStop now stores vertices, so resize accordingly.
     eventsOfStop.resize(numberOfStops);
 
-    // Organize events by stop and by trip.
     for (std::size_t i = 0; i < events.size(); ++i) {
       const auto& event = events[i];
       assert(event.stopId < eventsOfStop.size());
       assert(event.tripId < trips.size());
-      // For each event, add both an arrival and a departure vertex.
+
       eventsOfStop[event.stopId].push_back(static_cast<Vertex>(i << 1));
       eventsOfStop[event.stopId].push_back(static_cast<Vertex>((i << 1) + 1));
       trips[event.tripId].push_back(static_cast<EventID>(i));

@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
   PPL ppl(&tt.transferGraphs[FWD], &tt.transferGraphs[BWD], numThreads);
   ppl.paths = tt.eventsOfStop;
 
-  ppl.sortPaths();
+  ppl.sortPaths(RankingMethod::SUM);
 
   if (showstats) ppl.showPathStats();
 

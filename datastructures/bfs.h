@@ -16,6 +16,7 @@
 #include "../external/statistics_collecter.h"
 #include "bfs_tools.h"
 #include "graph.h"
+#include "utils.h"
 
 namespace bfs {
 
@@ -97,4 +98,118 @@ struct BFS {
     }
   }
 };
-};  // namespace bfs
+
+struct BFSParallelFrontier {
+  explicit BFSParallelFrontier(const Graph &graph, const int numThreads)
+      : graph(graph),
+        seen(graph.numVertices()),
+        q(graph.numVertices()),
+        local_cache(numThreads),
+        read(0),
+        write(0),
+        numThreads(numThreads) {}
+
+  void reset(const std::size_t numVertices) {
+    q.resize(numVertices);
+    read.store(0);
+    write.store(0);
+    seen.reset();
+    seen.resize(numVertices);
+    local_cache.assign(local_cache.size(), {});
+  }
+
+  void resetSeen() { seen.reset(); }
+
+  template <typename FUNC>
+  void doForAllVerticesInQ(FUNC &&func) {
+    const auto n = read.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < n; ++i) {
+      func(q[i]);
+    }
+  }
+
+  // Runs BFS from the given root vertex.
+  // The template parameter RESET_MARKER defaults to true.
+  template <bool RESET_MARKER = true,
+            typename ON_POP = decltype([](const Vertex) { return false; }),
+            typename ON_RELAX = decltype([](const Vertex, const Vertex) {
+              return false;
+            })>
+  void run(const Vertex root, ON_POP &&onPop, ON_RELAX &&onRelax) {
+    read.store(0);
+    write.store(0);
+    if constexpr (RESET_MARKER) {
+      seen.reset();
+    }
+    if (seen.isMarked(root)) [[unlikely]]
+      return;
+
+    std::size_t pos = write.fetch_add(1, std::memory_order_release);
+    assert(pos < q.size());
+    q[pos] = root;
+    seen.mark(root);
+
+    for (auto &cache : local_cache) {
+      cache.clear();
+    }
+
+    while (read.load(std::memory_order_acquire) <
+           write.load(std::memory_order_acquire)) {
+      processLevel(std::forward<ON_POP>(onPop),
+                   std::forward<ON_RELAX>(onRelax));
+    }
+    assert(read.load(std::memory_order_acquire) ==
+           write.load(std::memory_order_acquire));
+  }
+
+  // Processes one level of the BFS in parallel.
+  template <typename ON_POP, typename ON_RELAX>
+  void processLevel(ON_POP &&onPop, ON_RELAX &&onRelax) {
+    const std::size_t left = read.load(std::memory_order_acquire);
+    const std::size_t right = write.load(std::memory_order_acquire);
+
+    assert(left <= right);
+    assert(right <= q.size());
+
+    parallelFor(
+        left, right,
+        [&](const std::size_t t, const std::size_t i) {
+          const Vertex u = q[i];
+          if (onPop(u)) return;
+
+          for (std::size_t k = graph.beginEdge(u), endEdge = graph.endEdge(u);
+               k < endEdge; ++k) {
+            if (k + 4 < endEdge) {
+              PREFETCH(&graph.toVertex[k + 4]);
+            }
+            const Vertex w = graph.toVertex[k];
+            if (!seen.firstOccur(w)) continue;
+
+            if (onRelax(u, w)) continue;
+            local_cache[t].push_back(w);
+          }
+        },
+        numThreads);
+
+    for (auto &cache : local_cache) {
+      if (!cache.empty()) {
+        const std::size_t pos =
+            write.fetch_add(cache.size(), std::memory_order_release);
+        assert(pos + cache.size() <= q.size());
+        std::copy(cache.begin(), cache.end(), q.begin() + pos);
+        cache.clear();
+      }
+    }
+    read.store(right, std::memory_order_release);
+  }
+
+  const Graph &graph;
+  GenerationCheckerThreadSafe<> seen;
+  std::vector<Vertex> q;
+  std::vector<std::vector<Vertex>> local_cache;
+  std::atomic_size_t read;
+  std::atomic_size_t write;
+  int numThreads;
+};
+
+}  // namespace bfs

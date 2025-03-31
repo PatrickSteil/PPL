@@ -27,4 +27,4 @@ struct Chain {
   }
 };
 
-using Chains = std::list<Chain>;
+using Chains = std::vector<Chain>;

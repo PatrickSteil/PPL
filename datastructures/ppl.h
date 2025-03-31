@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-#include "bfs_tools.h"
+#include "bfs.h"
 #include "chain.h"
 #include "graph.h"
 #include "path_labels.h"
@@ -29,8 +29,7 @@ class PPL {
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
 
-  std::array<bfs::FixedSizedQueue<Vertex>, 2> queue;
-  std::array<bfs::GenerationChecker<>, 2> seen;
+  std::array<bfs::BFS, 2> bfs;
 
   std::vector<std::vector<Vertex>> paths;
 
@@ -42,10 +41,7 @@ class PPL {
                std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
-        queue{bfs::FixedSizedQueue<Vertex>(fwdGraph->numVertices()),
-              bfs::FixedSizedQueue<Vertex>(fwdGraph->numVertices())},
-        seen{bfs::GenerationChecker<>(fwdGraph->numVertices()),
-             bfs::GenerationChecker<>(fwdGraph->numVertices())},
+        bfs{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)},
         paths(),
         numThreads(numberOfThreads) {
     parallelFor(
@@ -77,57 +73,26 @@ class PPL {
   void run() {
     StatusLog log("Computing Path Labels");
 
-    auto processVertexFromPath = [&](const DIRECTION dir, const Vertex root,
-                                     const std::uint32_t path_id,
-                                     const std::uint32_t position) -> void {
-      assert(!seen[dir].isMarked(root));
-      std::size_t oldRead = queue[dir].read;
-      seen[dir].mark(root);
-      queue[dir].push(root);
-
-      while (!queue[dir].isEmpty()) {
-        const Vertex u = queue[dir].pop();
-
-        for (std::size_t i = graphs[dir]->beginEdge(u),
-                         end = graphs[dir]->endEdge(u);
-             i < end; ++i) {
-          if (i + 4 < end) {
-            PREFETCH(&graphs[dir]->toVertex[i + 4]);
-          }
-          const Vertex w = graphs[dir]->toVertex[i];
-          if (seen[dir].isMarked(w)) continue;
-          seen[dir].mark(w);
-
-          if (dir == FWD && query(labels[FWD][root], labels[BWD][w])) continue;
-          if (dir == BWD && query(labels[FWD][w], labels[BWD][root])) continue;
-          queue[dir].push(w);
-        }
-      }
-
-      std::size_t newRead = queue[dir].read;
-      assert(oldRead <= newRead);
-      assert(oldRead < queue[dir].data.size());
-      assert(newRead <= queue[dir].data.size());
-
-      for (; oldRead < newRead; ++oldRead) {
-        if (oldRead + 4 < newRead) {
-          PREFETCH(&labels[!dir][queue[dir].data[oldRead + 4]]);
-        }
-        Vertex other = queue[dir].data[oldRead];
-        assert(other < labels[!dir].size());
-        labels[!dir][other].emplace_back(path_id, position);
-        labels[!dir][other].sort();
-      }
-    };
-
     auto processChain = [&](const DIRECTION dir, const std::size_t p,
                             auto range) -> void {
-      seen[dir].reset();
-      queue[dir].reset();
+      bfs[dir].resetSeen();
 
       for (std::size_t i : range) {
         Vertex root = paths[p][i];
-        processVertexFromPath(dir, root, p, i);
+
+        bfs[dir].template run<false>(
+            root, bfs::noOp, [&](const Vertex, const Vertex to) {
+              Vertex fromVertex = (dir == FWD ? root : to);
+              Vertex toVertex = (dir == FWD ? to : root);
+
+              return (query(labels[FWD][fromVertex], labels[BWD][toVertex]));
+            });
+
+        bfs[dir].doForAllVerticesInQ([&](const Vertex v) {
+          assert(v < labels[!dir].size());
+          labels[!dir][v].emplace_back(p, i);
+          labels[!dir][v].sort();
+        });
       }
     };
 
@@ -231,23 +196,25 @@ class PPL {
 
     paths.clear();
 
-    paths.reserve(chains.size());
+    paths.resize(chains.size());
 
-    for (const auto& chain : chains) {
-      paths.emplace_back();
-      paths.back().reserve(chain.size());
+    parallelFor(0, chains.size(), [&](const std::size_t, const std::size_t i) {
+      const auto& chain = chains[i];
+      auto& p = paths[i];
+      p.reserve(chain.size());
 
       for (Vertex v : chain.getVertices()) {
-        paths.back().push_back(v);
+        p.push_back(v);
       }
-    }
+    });
   }
 
-  void sortPaths() {
+  // Modified sortPaths() function that sorts chains using the selected ranking
+  // method.
+  void sortPaths(RankingMethod method = RankingMethod::SUM) {
     assert(verifyPathDecomposition(paths));
 
     const std::size_t n = graphs[FWD]->numVertices();
-
     std::vector<std::size_t> value(n);
     parallelFor(
         0, n,
@@ -257,17 +224,67 @@ class PPL {
         },
         numThreads);
 
-    std::sort(paths.begin(), paths.end(),
-              [&](const std::vector<Vertex>& pathA,
-                  const std::vector<Vertex>& pathB) {
-                const std::size_t sumA = std::accumulate(
-                    pathA.begin(), pathA.end(), 0ULL,
-                    [&](std::size_t acc, Vertex v) { return acc + value[v]; });
-                const std::size_t sumB = std::accumulate(
-                    pathB.begin(), pathB.end(), 0ULL,
-                    [&](std::size_t acc, Vertex v) { return acc + value[v]; });
-                return sumA > sumB;
-              });
+    // Use a lambda for sorting the paths based on the selected ranking.
+    switch (method) {
+      case RankingMethod::LENGTH:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return pathA.size() > pathB.size();
+                  });
+        break;
+
+      case RankingMethod::SUM:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeSum(pathA, value) > computeSum(pathB, value);
+                  });
+        break;
+
+      case RankingMethod::AVERAGE:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeAverage(pathA, value) >
+                           computeAverage(pathB, value);
+                  });
+        break;
+
+      case RankingMethod::MIN:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeMin(pathA, value) > computeMin(pathB, value);
+                  });
+        break;
+
+      case RankingMethod::MAX:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeMax(pathA, value) > computeMax(pathB, value);
+                  });
+        break;
+
+      case RankingMethod::HYBRID:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeHybrid(pathA, value) >
+                           computeHybrid(pathB, value);
+                  });
+        break;
+
+      default:
+        // Fallback to SUM ranking if method is unknown.
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex>& pathA,
+                      const std::vector<Vertex>& pathB) {
+                    return computeSum(pathA, value) > computeSum(pathB, value);
+                  });
+        break;
+    }
   }
 
   bool verifyPathDecomposition(

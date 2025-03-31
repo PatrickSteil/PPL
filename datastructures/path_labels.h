@@ -1,3 +1,8 @@
+/*
+ * Licensed under MIT License.
+ * Author: Patrick Steil
+ */
+
 #pragma once
 
 #ifdef __GNUC__
@@ -185,7 +190,10 @@ class ThreadSafePathLabel {
 
 bool query(const PathLabel& from, const PathLabel& to) {
   std::size_t i = 0, j = 0;
-  while (i < from.size() && j < to.size()) {
+  const std::size_t fsize = from.size();
+  const std::size_t tsize = to.size();
+
+  while (i < fsize && j < tsize) {
     const auto& srcHub = from[i];
     const auto& tgtHub = to[j];
 
@@ -207,12 +215,14 @@ bool query(const PathLabel& from, const PathLabel& to) {
 bool query(const ThreadSafePathLabel& from, const ThreadSafePathLabel& to) {
   std::scoped_lock lock(from.m, to.m);
 
+  const std::size_t fsize = from.hubs.size();
+  const std::size_t tsize = to.hubs.size();
+
   std::size_t i = 0, j = 0;
-  while (i < from.hubs.size() && j < to.hubs.size()) {
+  while (i < fsize && j < tsize) {
     const auto& srcHub = from.hubs[i];
     const auto& tgtHub = to.hubs[j];
 
-    // Compare path ids to sync the two labels
     if (srcHub.getPath() < tgtHub.getPath()) {
       ++i;
     } else if (srcHub.getPath() > tgtHub.getPath()) {
