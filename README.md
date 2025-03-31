@@ -163,14 +163,14 @@ For the timetable variant, the process is as follows:
 Run the timetable variant with:
 
 ```bash
-./TT_PPL -i ../datasets/kvv/ -s -b
+./TT_PPL -i ../datasets/kvv/ -s -b -c
 ```
 
 Example Output:
-
 ```bash
-Loading TimeTable from file ... done [72ms]
-Build Time Expanded Graph ... done [170ms]
+Loading TimeTable from file ... done [70ms]
+Build Time Expanded Graph ... done [233ms]
+Compress Data ... done [99ms]
 TimeTable Statistics:
   Number of events:      214232
   Number of stops:       2740
@@ -178,32 +178,32 @@ TimeTable Statistics:
   Number of footpaths:   2774
 Transfer Graph Stats:
 Graph Statistics:
-  Number of vertices:            428464
-  Number of edges:               632192
+  Number of vertices:            300223
+  Number of edges:               708101
   Min degree:                    0
-  Max degree:                    11
-  Average degree:                1.47548
-  Number of isolated vertices:   139
+  Max degree:                    13
+  Average degree:                2.35858
+  Number of isolated vertices:   97
 Path Statistics:
   Total Paths:    2740
   Min Length:     2
-  Max Length:     1620
-  Average Length: 156.374
-Computing Path Labels ... done [966ms]
+  Max Length:     1365
+  Average Length: 109.57
+Computing Path Labels ... done [1860ms]
 Forward Labels Statistics:
   Min Size:     1
-  Max Size:     42
-  Avg Size:     12.1578
+  Max Size:     55
+  Avg Size:     16.5905
 Backward Labels Statistics:
   Min Size:     1
   Max Size:     47
-  Avg Size:     11.3196
-FWD # count:    5209181
-BWD # count:    4850034
-Both # count:   10059215
+  Avg Size:     16.7911
+FWD # count:    4980852
+BWD # count:    5041088
+Both # count:   10021940
 Total memory consumption [megabytes]:
-  57.9864
-The 100000 random queries took in total 3.30743e+07 [ns] and on average 330.743 [ns]! Counter: 31397
+  51.9738
+The 100000 random queries took in total 3.8408e+07 [ns] and on average 384.08 [ns]! Counter: 45698
 ```
 
 ## Reference

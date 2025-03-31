@@ -60,7 +60,7 @@ void parallelFor(std::size_t start, std::size_t end, FUNC &&func,
 
 template <typename T>
 void sortAndRemoveDuplicates(std::vector<T> &vec) {
-  std::sort(vec.begin(), vec.end());
+  std::stable_sort(vec.begin(), vec.end());
   vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
 }
 

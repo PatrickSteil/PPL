@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -176,6 +177,7 @@ struct TimeTable {
       Vertex toVertex = oldToNewMapping[v];
 
       if (fromVertex == toVertex) return;
+
       if (std::forward_as_tuple(times[fromVertex], fromVertex) >
           std::forward_as_tuple(times[toVertex], toVertex)) {
         std::swap(fromVertex, toVertex);
@@ -442,3 +444,47 @@ struct TimeTable {
     transferGraphs[FWD].showStats();
   }
 };
+
+// Query
+
+template <class PATHLABEL_TYPE = PathLabel>
+Time plt_query(const TimeTable& tt, std::array<std::vector<PATHLABEL_TYPE>, 2>&,
+               const StopID from, const StopID to, const Time depTime) {
+  assert(from < tt.numberOfStops());
+  assert(to < tt.numberOfStops());
+
+  if (from == to) return depTime;
+
+  return infinity;
+}
+
+template <class PATHLABEL_TYPE = PathLabel>
+void benchmark_ptl(const TimeTable&& tt,
+                   std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
+                   const std::size_t numQueries = 100000) {
+  using std::chrono::duration;
+  using std::chrono::duration_cast;
+  using std::chrono::high_resolution_clock;
+  using std::chrono::milliseconds;
+
+  assert(labels[FWD].size() == labels[BWD].size());
+
+  auto queries =
+      generateRandomQueries<StopID>(numQueries, 0, tt.numberOfStops());
+  long double totalTime(0);
+  std::size_t counter(0);
+
+  for (std::pair<StopID, StopID>& paar : queries) {
+    auto t1 = high_resolution_clock::now();
+    counter += plt_query(tt, labels, paar.first, paar.second, 8 * 60 * 60);
+    auto t2 = high_resolution_clock::now();
+    duration<double, std::nano> nano_double = t2 - t1;
+    totalTime += nano_double.count();
+  }
+
+  std::cout << "The " << numQueries
+            << " random stop-to-stop queries (depTime: 08:00) took in total "
+            << totalTime << " [ns] and on average "
+            << (double)(totalTime / numQueries) << " [ns]! Counter: " << counter
+            << "\n";
+}
