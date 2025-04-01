@@ -20,6 +20,9 @@ void configure_parser(cli::Parser &parser) {
                                    "Input TimeTable directory.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
+  parser.set_optional<std::string>(
+      "d", "output_dimacs_teg", "",
+      "Output file to save the time exapnded graph as DIMACS.");
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
@@ -39,6 +42,7 @@ int main(int argc, char *argv[]) {
 
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string outputFileName = parser.get<std::string>("o");
+  const std::string outputFileNameDimacs = parser.get<std::string>("d");
   const int numThreads = parser.get<int>("t");
   const bool contract = parser.get<bool>("c");
   const bool showstats = parser.get<bool>("s");
@@ -66,6 +70,9 @@ int main(int argc, char *argv[]) {
   if (outputFileName != "") saveToFile(ppl.labels, outputFileName);
 
   if (run_benchmark) benchmark_pathlabels(ppl.labels);
+
+  if (outputFileNameDimacs != "")
+    tt.transferGraphs[FWD].toDimacs(outputFileNameDimacs);
 
   return 0;
 }

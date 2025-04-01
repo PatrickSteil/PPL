@@ -263,6 +263,23 @@ struct Graph {
     }
   }
 
+  void toDimacs(const std::string &fileName) const {
+    std::ofstream file(fileName);
+    if (!file.is_open()) {
+      throw std::runtime_error("Cannot open file: " + fileName);
+    }
+
+    file << "p sp " << numVertices() << " " << numEdges() << "\n";
+
+    for (Vertex v = 0; v < numVertices(); ++v) {
+      for (std::size_t i = beginEdge(v); i < endEdge(v); ++i) {
+        file << "a " << (v + 1) << " " << (toVertex[i] + 1) << "\n";
+      }
+    }
+
+    file.close();
+  }
+
   void readSnap(const std::string &fileName) {
     StatusLog log("Reading graph from .snap format");
     clear();
