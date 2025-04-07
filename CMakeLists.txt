@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread")
+set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread -DGHEAP_CPP11")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
 
 set(CMAKE_CXX_FLAGS_RELEASE "-ffast-math -DNDEBUG -O3 -g")
@@ -20,10 +20,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Sanitize")
 endif()
 
 add_executable(PPL main.cpp)
-target_include_directories(PPL PUBLIC datastructures)
+target_include_directories(PPL PUBLIC datastructures external)
 
 add_executable(TT_PPL timetable_main.cpp)
-target_include_directories(TT_PPL PUBLIC datastructures)
+target_include_directories(TT_PPL PUBLIC datastructures external)
 
 enable_testing()
 find_package(GTest)
@@ -31,6 +31,7 @@ find_package(GTest)
 if(GTest_FOUND)
     add_executable(unit_test 
         tests/bit_vector_test.cpp 
+        tests/simd_tools_test.cpp 
         tests/bfs_tools_test.cpp 
         tests/graph_test.cpp 
         tests/path_labels_test.cpp 

@@ -18,31 +18,38 @@
 #include "chain.h"
 #include "graph.h"
 #include "path_labels.h"
+#include "simd_tools.h"
 #include "topological_sort.h"
 
-template <typename PATHLABEL_TYPE = PathLabel>
-class PPL {
+class PPLSimd {
  public:
   std::array<Graph*, 2> graphs;
-  std::array<std::vector<PATHLABEL_TYPE>, 2> labels;
+  std::array<std::vector<ThreadSafePathLabel>, 2> labels;
 
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
 
-  std::array<bfs::BFS, 2> bfs;
+  std::vector<std::array<bfs::BFS, 2>> bfs;
 
   std::vector<std::vector<Vertex>> paths;
 
+  std::array<std::vector<simd_u16x8>, 2> pathReachability;
+  std::vector<std::pair<Vertex, Vertex>> edges;
+
   const int numThreads;
 
-  PPL(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
+  PPLSimd(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
-        labels{std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices()),
-               std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices())},
+        labels{std::vector<ThreadSafePathLabel>(fwdGraph->numVertices()),
+               std::vector<ThreadSafePathLabel>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
-        bfs{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)},
+        bfs(numberOfThreads,
+            std::array<bfs::BFS, 2>{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)}),
         paths(),
+        pathReachability{std::vector<simd_u16x8>(fwdGraph->numVertices()),
+                         std::vector<simd_u16x8>(fwdGraph->numVertices())},
+        edges(),
         numThreads(numberOfThreads) {
     parallelFor(
         0, rank.size(),
@@ -50,6 +57,7 @@ class PPL {
           rank[topoSorter[r]] = r;
         },
         numThreads);
+    buildEdgesSortedTopo();
   };
 
   void showStats() { showLabelStats(labels); }
@@ -70,25 +78,45 @@ class PPL {
         numThreads);
   }
 
+  void clearReachability() {
+    assert(pathReachability[FWD].size() == pathReachability[BWD].size());
+    parallelFor(
+        0, pathReachability[FWD].size(),
+        [&](const std::size_t, const std::size_t v) {
+          pathReachability[FWD][v].clear();
+          pathReachability[BWD][v].clear(0);
+        },
+        numThreads);
+  }
+
   void run() {
     StatusLog log("Computing Path Labels");
 
-    auto processChain = [&](const DIRECTION dir, const std::size_t p,
-                            auto range) -> void {
-      bfs[dir].resetSeen();
+    auto processChain = [&](const std::size_t threadId, const DIRECTION dir,
+                            const std::size_t p, auto range,
+                            const bool PRUNE_WITH_SIMD = false) -> void {
+      assert(threadId < bfs.size());
+      bfs[threadId][dir].resetSeen();
 
       for (std::size_t i : range) {
         Vertex root = paths[p][i];
 
-        bfs[dir].template run<false>(
+        bfs[threadId][dir].template run<false>(
             root, bfs::noOp, [&](const Vertex, const Vertex to) {
               Vertex fromVertex = (dir == FWD ? root : to);
               Vertex toVertex = (dir == FWD ? to : root);
 
-              return (query(labels[FWD][fromVertex], labels[BWD][toVertex]));
+              if (PRUNE_WITH_SIMD) {
+                if (prune(pathReachability[FWD][fromVertex],
+                          pathReachability[BWD][toVertex], threadId)) {
+                  return true;
+                }
+              }
+
+              return query(labels[FWD][fromVertex], labels[BWD][toVertex]);
             });
 
-        bfs[dir].doForAllVerticesInQ([&](const Vertex v) {
+        bfs[threadId][dir].doForAllVerticesInQ([&](const Vertex v) {
           assert(v < labels[!dir].size());
           labels[!dir][v].emplace_back(p, i);
           labels[!dir][v].sort();
@@ -96,117 +124,46 @@ class PPL {
       }
     };
 
-    for (std::uint32_t p = 0; p < paths.size(); ++p) {
+    std::size_t p = 0;
+
+    for (const std::size_t end = paths.size(); p + 8 < end; p += 8) {
+      topoSweep(p);
+
+      parallelFor(
+          0, 8,
+          [&](const std::size_t threadId, const std::size_t i) {
+            const std::size_t start = 0;
+            const std::size_t end = paths[i].size();
+
+            processChain(
+                threadId, FWD, i,
+                std::views::iota(start, end) | std::ranges::views::reverse,
+                true);
+            processChain(threadId, BWD, i, std::views::iota(start, end), true);
+          },
+          numThreads);
+    }
+
+    // const std::size_t startOfPaths = p;
+    // const std::size_t endOfPaths = paths.size();
+
+    // parallelFor(startOfPaths, endOfPaths, [&](const std::size_t threadId,
+    // const std::size_t i) {
+    //     const std::size_t start = 0;
+    //     const std::size_t end = paths[i].size();
+
+    //     processChain(threadId, FWD, i, std::views::iota(start, end) |
+    //     std::ranges::views::reverse); processChain(threadId, BWD, i,
+    //     std::views::iota(start, end));
+    //   }, numThreads);
+    for (; p < paths.size(); ++p) {
       const std::size_t start = 0;
       const std::size_t end = paths[p].size();
 
-      processChain(FWD, p,
+      processChain(0, FWD, p,
                    std::views::iota(start, end) | std::ranges::views::reverse);
-      processChain(BWD, p, std::views::iota(start, end));
+      processChain(0, BWD, p, std::views::iota(start, end));
     }
-  }
-
-  void chainDecomposition() {
-    StatusLog log("Computing Chain Decomposition");
-    const std::size_t n = graphs[FWD]->numVertices();
-
-    std::vector<Chain*> chainOfVertex(n, nullptr);
-    Chains chains;
-    std::vector<bool> visited(n, false);
-
-    auto reversedDFSlookup = [&](Vertex v) -> Vertex {
-      std::vector<Vertex> stack;
-      stack.push_back(v);
-
-      while (!stack.empty()) {
-        Vertex cur = stack.back();
-        stack.pop_back();
-
-        for (std::size_t i = graphs[BWD]->beginEdge(cur);
-             i < graphs[BWD]->endEdge(cur); ++i) {
-          Vertex w = graphs[BWD]->toVertex[i];
-
-          if (!visited[w]) {
-            auto chainPtr = chainOfVertex[w];
-
-            if (chainPtr != nullptr && chainPtr->getLastVertex() == w) {
-              for (Vertex other : stack) {
-                visited[other] = false;
-              }
-              return w;
-            }
-
-            stack.push_back(w);
-            visited[w] = true;
-          }
-        }
-      }
-
-      return noVertex;
-    };
-
-    for (Vertex v : topoSorter.getOrdering()) {
-      bool belongToChain = (chainOfVertex[v] != nullptr);
-      Vertex toAdd = noVertex;
-      std::size_t min_outdegree = n;
-
-      if (!belongToChain) {
-        graphs[BWD]->relaxAllEdges(
-            v, [&](const Vertex, const Vertex adjSource) {
-              int adjRank = rank[adjSource];
-              Chain* C = chainOfVertex[adjRank];
-              if (C != nullptr && !C->empty() &&
-                  C->getVertices().back() == adjSource) {
-                std::size_t adjOutdegree = graphs[FWD]->degree(adjSource);
-                if (adjOutdegree < min_outdegree) {
-                  min_outdegree = adjOutdegree;
-                  toAdd = adjSource;
-                }
-              }
-            });
-
-        if (toAdd == noVertex) {
-          toAdd = reversedDFSlookup(v);
-        }
-      }
-
-      if (toAdd != noVertex) {
-        Chain* C = chainOfVertex[toAdd];
-        C->push(v);
-        chainOfVertex[v] = C;
-      } else if (!belongToChain) {
-        chains.push_back(Chain());
-        Chain* C = &chains.back();
-        C->push(v);
-        chainOfVertex[v] = C;
-      }
-
-      for (std::size_t i = graphs[FWD]->beginEdge(v);
-           i < graphs[FWD]->endEdge(v); ++i) {
-        Vertex w = graphs[FWD]->toVertex[i];
-
-        if (graphs[BWD]->degree(w) == 1) {
-          Chain* C = chainOfVertex[v];
-          C->push(w);
-          chainOfVertex[w] = C;
-          break;
-        }
-      };
-    }
-
-    paths.clear();
-
-    paths.resize(chains.size());
-
-    parallelFor(0, chains.size(), [&](const std::size_t, const std::size_t i) {
-      const auto& chain = chains[i];
-      auto& p = paths[i];
-      p.reserve(chain.size());
-
-      for (Vertex v : chain.getVertices()) {
-        p.push_back(v);
-      }
-    });
   }
 
   // Modified sortPaths() function that sorts chains using the selected ranking
@@ -333,90 +290,69 @@ class PPL {
 
     double avgLength = static_cast<double>(totalLength.load()) / totalPaths;
 
-    std::sort(pathLengths.begin(), pathLengths.end());
-
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
     std::cout << "  Min Length:     " << minLength.load() << "\n";
     std::cout << "  Max Length:     " << maxLength.load() << "\n";
     std::cout << "  Average Length: " << avgLength << "\n";
 
-    std::cout << "  Percentiles:\n";
-    for (int p = 10; p <= 90; p += 10) {
-      std::size_t index = (p * totalPaths) / 100;
-      if (index >= totalPaths) index = totalPaths - 1;
-      std::cout << "    " << p << "%: " << pathLengths[index] << "\n";
-    }
+    // std::sort(pathLengths.begin(), pathLengths.end());
+    // std::cout << "  Percentiles:\n";
+    // for (int p = 10; p <= 90; p += 10) {
+    //     std::size_t index = (p * totalPaths) / 100;
+    //     if (index >= totalPaths) index = totalPaths - 1;
+    //     std::cout << "    " << p << "%: " << pathLengths[index] << "\n";
+    // }
   }
 
-  void computePaths() {
-    StatusLog log("Computing DPInOut");
+  void buildEdgesSortedTopo() {
+    edges.clear();
+    edges.reserve(graphs[FWD]->numEdges());
 
-    const std::size_t n = graphs[FWD]->numVertices();
+    graphs[FWD]->doForAllEdges([&](const Vertex from, const Vertex to) {
+      edges.emplace_back(from, to);
+    });
 
-    std::vector<std::size_t> value(n, 0);
-    for (std::size_t v = 0; v < n; ++v) {
-      value[v] = (graphs[FWD]->degree(v) + 1) * (graphs[BWD]->degree(v) + 1);
-    }
+    std::sort(edges.begin(), edges.end(),
+              [&](const auto& left, const auto& right) {
+                return std::tie(rank[left.first], rank[left.second]) <
+                       std::tie(rank[right.first], rank[right.second]);
+              });
+  }
 
-    graphs[FWD]->sortByRank(rank);
-    graphs[BWD]->sortByRank(rank);
+  void topoSweep(std::size_t nextPathId) {
+    clearReachability();
 
-    std::vector<bool> already_chosen(n, false);
-    std::vector<std::size_t> sum(n, 0);
-    std::vector<Vertex> parent(n, noVertex);
+    parallelFor(0, 8, [&](const std::size_t, const std::size_t i = 0) {
+      assert(nextPathId + i < paths.size());
+      const auto& path = paths[nextPathId + i];
 
-    paths.clear();
-
-    bool foundAnyPath = true;
-
-    while (foundAnyPath) {
-      foundAnyPath = false;
-
-      std::fill(parent.begin(), parent.end(), noVertex);
-      std::fill(sum.begin(), sum.end(), 0);
-
-      Vertex best_v = noVertex;
-      std::size_t best_val = 0;
-
-      for (Vertex u : topoSorter.getOrdering()) {
-        if (already_chosen[u]) continue;
-
-        graphs[FWD]->relaxAllEdges(u, [&](const Vertex, const Vertex v) {
-          if (already_chosen[v]) return;
-
-          const std::size_t new_sum = sum[u] + value[v];
-          bool update = (new_sum > sum[v]);
-          sum[v] = update ? new_sum : sum[v];
-          parent[v] = update ? u : parent[v];
-
-          bool new_best = (sum[v] > best_val);
-          best_val = new_best ? sum[v] : best_val;
-          best_v = new_best ? v : best_v;
-        });
+      for (std::size_t pos = 0; pos < path.size(); ++pos) {
+        Vertex v = path[pos];
+        pathReachability[FWD][v][i] = static_cast<std::uint16_t>(pos + 1);
+        pathReachability[BWD][v][i] = static_cast<std::uint16_t>(pos + 1);
       }
+    });
 
-      if (best_v != noVertex && best_val > 0) {
-        foundAnyPath = true;
-        std::vector<Vertex> path;
-        path.reserve(sum.size());
-        for (Vertex cur = best_v; cur != noVertex; cur = parent[cur]) {
-          path.push_back(cur);
-        }
-        // std::reverse(path.begin(), path.end());
-        for (auto node : path) {
-          already_chosen[node] = true;
-        }
-        paths.push_back(path);
+    assert(std::is_sorted(
+        edges.begin(), edges.end(), [&](const auto& left, const auto& right) {
+          return std::tie(rank[left.first], rank[left.second]) <
+                 std::tie(rank[right.first], rank[right.second]);
+        }));
+
+    std::thread reverseThread([&]() {
+      for (auto [from, to] : edges) {
+        pathReachability[BWD][to].setMax(pathReachability[BWD][from]);
       }
-    }
+    });
 
-    // std::cout << "\n[Info] Nr. Paths: " << paths.size() << std::endl;
+    std::thread forwardThread([&]() {
+      for (auto [from, to] : edges | std::views::reverse) {
+        pathReachability[FWD][from].setMin(pathReachability[FWD][to]);
+      }
+    });
 
-    // // Output all the paths found.
-    // for (auto& path : paths) {
-    //   for (auto v : path) std::cout << v << " ";
-    //   std::cout << std::endl;
-    // }
+    reverseThread.join();
+    forwardThread.join();
   }
 };

@@ -31,6 +31,7 @@ constexpr std::size_t noIndex = std::size_t(-1);
 constexpr std::uint8_t noDistance = std::numeric_limits<std::uint8_t>::max();
 constexpr std::uint8_t infinity = std::numeric_limits<std::uint8_t>::max() / 2;
 constexpr std::uint8_t noStopPos = std::uint8_t(-1);
+constexpr std::uint16_t noPathPos = std::uint16_t(-1);
 
 enum DIRECTION : bool { FWD, BWD };
 

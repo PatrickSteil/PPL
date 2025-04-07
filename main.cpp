@@ -31,7 +31,12 @@ void configure_parser(cli::Parser &parser) {
 };
 
 int main(int argc, char *argv[]) {
-  cli::Parser parser(argc, argv);
+  cli::Parser parser(
+      argc, argv,
+      "Pruned Path Labeling (TT_PPL).\nThe "
+      "paths are processed by importance (here: weighted sum of "
+      "vertices).\nThis program can compute pathlabels, execute random queries "
+      "and show the overall memory consumption.");
   configure_parser(parser);
   parser.run_and_exit_if_error();
 

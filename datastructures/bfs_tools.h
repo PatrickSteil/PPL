@@ -5,12 +5,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <vector>
 
 #include "spinlock.h"
@@ -346,6 +348,124 @@ class GenerationCheckerThreadSafe {
  private:
   std::vector<std::atomic<GenerationType>> seen;
   std::atomic<GenerationType> generation;
+};
+
+template <std::integral T>
+class BinaryHeap {
+ public:
+  // maxActive: maximum active elements (N). We allocate 2*N slots:
+  // indices [0, maxActive) for the active heap and
+  // indices [maxActive, maxActive+poppedCount) for popped elements.
+  BinaryHeap(std::size_t maxActive)
+      : maxActive(maxActive), heapSize(0), poppedCount(0) {
+    data.resize(2 * maxActive);
+  }
+
+  void clear() {
+    heapSize = 0;
+    poppedCount = 0;
+  }
+
+  // Insert a single element into the active heap.
+  void push(const T value) {
+    if (heapSize >= maxActive) {
+      throw std::runtime_error("Active heap is full");
+    }
+    data[heapSize] = value;
+    heapSize++;
+    bubbleUp(heapSize - 1);
+  }
+
+  // Insert multiple elements into the active heap and build a heap in linear
+  // time.
+  void push(const std::vector<T> &elems) {
+    clear();
+    if (heapSize + elems.size() > maxActive) {
+      throw std::runtime_error("Not enough space in active heap");
+    }
+    for (std::size_t i = 0; i < elems.size(); ++i) {
+      data[heapSize + i] = elems[i];
+    }
+    heapSize += elems.size();
+
+    for (int i = (heapSize / 2) - 1; i >= 0; i--) {
+      bubbleDown(i);
+    }
+  }
+
+  // Return the top element (the minimum).
+  T top() const {
+    if (heapSize == 0) {
+      throw std::runtime_error("Heap is empty");
+    }
+    return data[0];
+  }
+
+  // Remove the top element from the active heap.
+  // The removed element is copied into the popped region.
+  T pop() {
+    if (heapSize == 0) {
+      throw std::runtime_error("Heap is empty");
+    }
+    T minElem = data[0];
+
+    data[0] = data[heapSize - 1];
+    heapSize--;
+    bubbleDown(0);
+
+    data[maxActive + poppedCount] = minElem;
+    poppedCount++;
+    return minElem;
+  }
+
+  template <typename FUNC>
+  void doForAllPoppedElements(const FUNC &&function) {
+    for (std::size_t i = maxActive; i < maxActive + poppedCount; ++i) {
+      function(data[i]);
+    }
+  }
+
+  bool empty() const { return heapSize == 0; }
+
+ private:
+  std::vector<T> data;
+  std::size_t maxActive;
+  std::size_t heapSize;
+  std::size_t poppedCount;
+
+  // Restore heap property by bubbling up.
+  void bubbleUp(std::size_t index) {
+    while (index > 0) {
+      std::size_t parent = (index - 1) / 2;
+      if (data[index] < data[parent]) {
+        std::swap(data[index], data[parent]);
+        index = parent;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Restore heap property by bubbling down.
+  void bubbleDown(std::size_t index) {
+    while (true) {
+      std::size_t left = 2 * index + 1;
+      std::size_t right = 2 * index + 2;
+      std::size_t smallest = index;
+      if (left < heapSize && data[left] < data[smallest]) {
+        smallest = left;
+      }
+      if (right < heapSize && data[right] < data[smallest]) {
+        smallest = right;
+      }
+      if (smallest != index) {
+        std::swap(data[index], data[smallest]);
+        index = smallest;
+      } else {
+        break;
+      }
+    }
+  }
 };
 
 }  // namespace bfs

@@ -11,11 +11,17 @@
 #define PREFETCH(addr)
 #endif
 
+#include <functional>
 #include <optional>
+#include <queue>
+#include <vector>
 
-#include "../external/statistics_collecter.h"
+#include "statistics_collecter.h"
+// #include "gheap/gpriority_queue.hpp"
+// #include "gheap/gheap_cpp11.hpp"
 #include "bfs_tools.h"
 #include "graph.h"
+#include "radix-heap/radix_heap.h"
 #include "utils.h"
 
 namespace bfs {
@@ -94,6 +100,73 @@ struct BFS {
         }
 
         q.push(w);
+      }
+    }
+  }
+};
+
+template <DIRECTION dir = FWD, typename FWD_PQ = radix_heap::radix_heap<Vertex>,
+          typename BWD_PQ = radix_heap::max_radix_heap<Vertex>>
+struct TBFS {
+  using PQ = std::conditional_t<(dir == FWD), FWD_PQ, BWD_PQ>;
+
+  const Graph &graph;
+  PQ pq;
+  GenerationChecker<> seen;
+
+  TBFS(const Graph &graph) : graph(graph), pq(), seen(graph.numVertices()) {}
+
+  void reset(const std::size_t numVertices) {
+    std::vector<Vertex> container;
+    container.reserve(numVertices);
+
+    seen.reset();
+    seen.resize(numVertices);
+  }
+
+  void resetSeen() { seen.reset(); }
+
+  void addRoots(const std::vector<Vertex> &roots) {
+    std::vector<Vertex> container;
+    container.reserve(graph.numVertices());
+
+    for (const Vertex &root : roots) {
+      if (!seen.isMarked(root)) [[likely]] {
+        seen.mark(root);
+        container.push_back(root);
+      }
+    }
+
+    pq.clear();
+    pq.push(container);
+  }
+
+  template <typename ON_POP = decltype([](const Vertex) { return false; }),
+            typename ON_RELAX = decltype([](const Vertex, const Vertex) {
+              return false;
+            })>
+  void run(ON_POP &&onPop, ON_RELAX &&onRelax) {
+    while (!pq.empty()) {
+      const Vertex u = pq.top();
+      pq.pop();
+
+      if (onPop(u)) continue;
+
+      for (std::size_t i = graph.beginEdge(u), end = graph.endEdge(u); i < end;
+           ++i) {
+        if (i + 4 < end) {
+          PREFETCH(&graph.toVertex[i + 4]);
+        }
+        const Vertex w = graph.toVertex[i];
+
+        if (onRelax(u, w)) {
+          continue;
+        }
+
+        if (seen.isMarked(w)) continue;
+        seen.mark(w);
+
+        pq.push(w);
       }
     }
   }

@@ -165,37 +165,39 @@ class PPL {
     }
 
     std::size_t totalPaths = paths.size();
-    std::size_t minLength = std::numeric_limits<std::size_t>::max();
-    std::size_t maxLength = 0;
-    std::size_t totalLength = 0;
-    // std::vector<std::size_t> lengths;
-    // lengths.reserve(totalPaths);
+    std::atomic<std::size_t> minLength{std::numeric_limits<std::size_t>::max()};
+    std::atomic<std::size_t> maxLength{0};
+    std::atomic<std::size_t> totalLength{0};
+    std::vector<std::size_t> pathLengths(totalPaths);
 
-    for (const auto& path : paths) {
-      std::size_t length = path.size();
-      // lengths.push_back(length);
-      minLength = std::min(minLength, length);
-      maxLength = std::max(maxLength, length);
-      totalLength += length;
-    }
+    parallelFor(
+        0, totalPaths,
+        [&](const std::size_t, const std::size_t i) {
+          const auto& path = paths[i];
+          std::size_t length = path.size();
+          pathLengths[i] = length;
 
-    double avgLength = static_cast<double>(totalLength) / totalPaths;
+          fetch_min(minLength, length);
+          fetch_max(maxLength, length);
+          totalLength.fetch_add(length, std::memory_order_relaxed);
+        },
+        numThreads);
 
-    // std::sort(lengths.begin(), lengths.end());
+    double avgLength = static_cast<double>(totalLength.load()) / totalPaths;
+
+    std::sort(pathLengths.begin(), pathLengths.end());
 
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
-    std::cout << "  Min Length:     " << minLength << "\n";
-    std::cout << "  Max Length:     " << maxLength << "\n";
+    std::cout << "  Min Length:     " << minLength.load() << "\n";
+    std::cout << "  Max Length:     " << maxLength.load() << "\n";
     std::cout << "  Average Length: " << avgLength << "\n";
 
-    // std::cout << "  Percentiles (path length):\n";
-    // for (int percentile = 0; percentile <= 100; percentile += 10) {
-    //     std::size_t index = static_cast<std::size_t>(
-    //         std::round((percentile / 100.0) * (lengths.size() - 1))
-    //     );
-    //     std::cout << "    " << percentile << "th percentile: " <<
-    //     lengths[index] << "\n";
-    // }
+    std::cout << "  Percentiles:\n";
+    for (int p = 10; p <= 90; p += 10) {
+      std::size_t index = (p * totalPaths) / 100;
+      if (index >= totalPaths) index = totalPaths - 1;
+      std::cout << "    " << p << "%: " << pathLengths[index] << "\n";
+    }
   }
 };

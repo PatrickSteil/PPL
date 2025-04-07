@@ -11,7 +11,8 @@
 #include <thread>
 #include <utility>
 
-#include "datastructures/ppl.h"
+// #include "datastructures/ppl.h"
+#include "datastructures/ppl_bit.h"
 #include "datastructures/timetable.h"
 #include "external/cmdparser.hpp"
 
@@ -36,7 +37,14 @@ void configure_parser(cli::Parser &parser) {
 };
 
 int main(int argc, char *argv[]) {
-  cli::Parser parser(argc, argv);
+  cli::Parser parser(
+      argc, argv,
+      "Timetable Pruned Path Labeling (TT_PPL).\nThe paths choosen are all "
+      "events (arrival- and departureevents) at a stop sorted by time.\nThe "
+      "paths are processed by importance (here: weighted sum of "
+      "vertices).\nThis program can compute pathlabels, save them, execute "
+      "random queries "
+      "and show the overall memory consumption.");
   configure_parser(parser);
   parser.run_and_exit_if_error();
 
@@ -53,12 +61,12 @@ int main(int argc, char *argv[]) {
   tt.buildTEGraph();
 
   if (contract) tt.contract();
-
   if (showstats) tt.showStats();
 
-  PPL ppl(&tt.transferGraphs[FWD], &tt.transferGraphs[BWD], numThreads);
+  PPLBit ppl(&tt.transferGraphs[FWD], &tt.transferGraphs[BWD], numThreads);
   ppl.paths = tt.eventsOfStop;
 
+  ppl.reorderByRank();
   ppl.sortPaths(RankingMethod::SUM);
 
   if (showstats) ppl.showPathStats();

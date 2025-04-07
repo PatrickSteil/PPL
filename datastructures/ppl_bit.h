@@ -12,6 +12,7 @@
 #include <ranges>
 #include <stack>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #include "bfs.h"
@@ -20,28 +21,32 @@
 #include "path_labels.h"
 #include "topological_sort.h"
 
-template <typename PATHLABEL_TYPE = PathLabel>
-class PPL {
+class PPLBit {
  public:
   std::array<Graph*, 2> graphs;
-  std::array<std::vector<PATHLABEL_TYPE>, 2> labels;
+  std::array<std::vector<PathLabel>, 2> labels;
 
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
 
-  std::array<bfs::BFS, 2> bfs;
+  using BFSVariant = std::variant<bfs::TBFS<FWD>, bfs::TBFS<BWD>>;
+  std::array<BFSVariant, 2> bfs;
+  std::array<std::vector<std::uint16_t>, 2> bestPosToPath;
 
   std::vector<std::vector<Vertex>> paths;
 
   const int numThreads;
 
-  PPL(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
+  PPLBit(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
-        labels{std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices()),
-               std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices())},
+        labels{std::vector<PathLabel>(fwdGraph->numVertices()),
+               std::vector<PathLabel>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
-        bfs{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)},
+        bfs{bfs::TBFS<FWD>(*fwdGraph), bfs::TBFS<BWD>(*bwdGraph)},
+        bestPosToPath{
+            std::vector<std::uint16_t>(fwdGraph->numVertices(), 0),
+            std::vector<std::uint16_t>(bwdGraph->numVertices(), noPathPos)},
         paths(),
         numThreads(numberOfThreads) {
     parallelFor(
@@ -51,6 +56,23 @@ class PPL {
         },
         numThreads);
   };
+
+  void reorderByRank() {
+    graphs[FWD]->reorderByRank(rank);
+    graphs[BWD]->reorderByRank(rank);
+
+    parallelFor(
+        0, paths.size(),
+        [&](const std::size_t, const std::size_t p) {
+          auto& path = paths[p];
+          for (auto& v : path) {
+            v = rank[v];
+          }
+
+          std::sort(path.begin(), path.end());
+        },
+        numThreads);
+  }
 
   void showStats() { showLabelStats(labels); }
 
@@ -73,36 +95,62 @@ class PPL {
   void run() {
     StatusLog log("Computing Path Labels");
 
-    auto processChain = [&](const DIRECTION dir, const std::size_t p,
-                            auto range) -> void {
-      bfs[dir].resetSeen();
+    auto processChain = [&](const DIRECTION dir, const std::size_t p) -> void {
+      const std::vector<Vertex>& path = paths[p];
 
-      for (std::size_t i : range) {
-        Vertex root = paths[p][i];
+      std::visit(
+          [&](auto& thisBFS) {
+            thisBFS.resetSeen();
+            thisBFS.addRoots(path);
 
-        bfs[dir].template run<false>(
-            root, bfs::noOp, [&](const Vertex, const Vertex to) {
-              Vertex fromVertex = (dir == FWD ? root : to);
-              Vertex toVertex = (dir == FWD ? to : root);
+            std::vector<Vertex> currentSeen;
+            currentSeen.reserve(graphs[FWD]->numVertices());
 
-              return (query(labels[FWD][fromVertex], labels[BWD][toVertex]));
-            });
+            for (std::size_t i = 0; i < path.size(); ++i) {
+              bestPosToPath[dir][path[i]] = i;
+            }
 
-        bfs[dir].doForAllVerticesInQ([&](const Vertex v) {
-          assert(v < labels[!dir].size());
-          labels[!dir][v].emplace_back(p, i);
-          labels[!dir][v].sort();
-        });
-      }
+            thisBFS.run(
+                [&currentSeen](const Vertex v) {
+                  currentSeen.emplace_back(v);
+                  return false;
+                },
+                [&](const Vertex from, const Vertex to) {
+                  if (dir == FWD) {
+                    bestPosToPath[dir][to] = std::max(bestPosToPath[dir][to],
+                                                      bestPosToPath[dir][from]);
+                  } else {
+                    bestPosToPath[dir][to] = std::min(bestPosToPath[dir][to],
+                                                      bestPosToPath[dir][from]);
+                  }
+
+                  Vertex fromVertex =
+                      (dir == FWD ? path[bestPosToPath[dir][from]] : to);
+                  Vertex toVertex =
+                      (dir == FWD ? to : path[bestPosToPath[dir][from]]);
+
+                  return (
+                      query(labels[FWD][fromVertex], labels[BWD][toVertex]));
+                });
+
+            for (const Vertex v : currentSeen) {
+              assert(v < labels[!dir].size());
+              assert(bestPosToPath[dir][v] < path.size());
+
+              labels[!dir][v].emplace_back(p, bestPosToPath[dir][v]);
+              labels[!dir][v].sort();
+            }
+          },
+          bfs[dir]);
     };
 
-    for (std::uint32_t p = 0; p < paths.size(); ++p) {
-      const std::size_t start = 0;
-      const std::size_t end = paths[p].size();
+    for (std::size_t p = 0; p < paths.size(); ++p) {
+      std::fill(bestPosToPath[FWD].begin(), bestPosToPath[FWD].end(), 0);
+      std::fill(bestPosToPath[BWD].begin(), bestPosToPath[BWD].end(),
+                noPathPos);
 
-      processChain(FWD, p,
-                   std::views::iota(start, end) | std::ranges::views::reverse);
-      processChain(BWD, p, std::views::iota(start, end));
+      processChain(FWD, p);
+      processChain(BWD, p);
     }
   }
 

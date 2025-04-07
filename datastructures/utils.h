@@ -232,6 +232,17 @@ bool fetch_max(std::atomic<T> &atomicValue, T newValue) {
 }
 
 template <typename T>
+bool fetch_min(std::atomic<T> &atomicValue, T newValue) {
+  T oldValue = atomicValue.load();
+  while (newValue < oldValue) {
+    if (atomicValue.compare_exchange_weak(oldValue, newValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename T>
 bool intersect(const std::vector<T> &A, const std::vector<T> &B) {
   assert(std::is_sorted(A.begin(), A.end()));
   assert(std::is_sorted(B.begin(), B.end()));
