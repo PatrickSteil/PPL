@@ -21,10 +21,11 @@
 #include "simd_tools.h"
 #include "topological_sort.h"
 
+template <typename PATHLABEL_TYPE = ThreadSafePathLabel>
 class PPLSimd {
  public:
   std::array<Graph*, 2> graphs;
-  std::array<std::vector<ThreadSafePathLabel>, 2> labels;
+  std::array<std::vector<PATHLABEL_TYPE>, 2> labels;
 
   TopologicalSort topoSorter;
   std::vector<std::size_t> rank;
@@ -40,8 +41,8 @@ class PPLSimd {
 
   PPLSimd(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
-        labels{std::vector<ThreadSafePathLabel>(fwdGraph->numVertices()),
-               std::vector<ThreadSafePathLabel>(fwdGraph->numVertices())},
+        labels{std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices()),
+               std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices())},
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
         bfs(numberOfThreads,
@@ -93,13 +94,14 @@ class PPLSimd {
     StatusLog log("Computing Path Labels");
 
     auto processChain = [&](const std::size_t threadId, const DIRECTION dir,
-                            const std::size_t p, auto range,
+                            const std::size_t pStart, const std::size_t offset,
+                            auto range,
                             const bool PRUNE_WITH_SIMD = false) -> void {
       assert(threadId < bfs.size());
       bfs[threadId][dir].resetSeen();
 
       for (std::size_t i : range) {
-        Vertex root = paths[p][i];
+        Vertex root = paths[pStart + offset][i];
 
         bfs[threadId][dir].template run<false>(
             root, bfs::noOp, [&](const Vertex, const Vertex to) {
@@ -108,7 +110,7 @@ class PPLSimd {
 
               if (PRUNE_WITH_SIMD) {
                 if (prune(pathReachability[FWD][fromVertex],
-                          pathReachability[BWD][toVertex], threadId)) {
+                          pathReachability[BWD][toVertex], offset)) {
                   return true;
                 }
               }
@@ -118,7 +120,7 @@ class PPLSimd {
 
         bfs[threadId][dir].doForAllVerticesInQ([&](const Vertex v) {
           assert(v < labels[!dir].size());
-          labels[!dir][v].emplace_back(p, i);
+          labels[!dir][v].emplace_back(pStart + offset, i);
           labels[!dir][v].sort();
         });
       }
@@ -126,43 +128,32 @@ class PPLSimd {
 
     std::size_t p = 0;
 
-    for (const std::size_t end = paths.size(); p + 8 < end; p += 8) {
+    for (const std::size_t end = (paths.size() >> 4); p + 8 <= end; p += 8) {
       topoSweep(p);
 
       parallelFor(
           0, 8,
           [&](const std::size_t threadId, const std::size_t i) {
             const std::size_t start = 0;
-            const std::size_t end = paths[i].size();
+            const std::size_t end = paths[p + i].size();
 
             processChain(
-                threadId, FWD, i,
+                threadId, FWD, p, i,
                 std::views::iota(start, end) | std::ranges::views::reverse,
                 true);
-            processChain(threadId, BWD, i, std::views::iota(start, end), true);
+            processChain(threadId, BWD, p, i, std::views::iota(start, end),
+                         true);
           },
           numThreads);
     }
 
-    // const std::size_t startOfPaths = p;
-    // const std::size_t endOfPaths = paths.size();
-
-    // parallelFor(startOfPaths, endOfPaths, [&](const std::size_t threadId,
-    // const std::size_t i) {
-    //     const std::size_t start = 0;
-    //     const std::size_t end = paths[i].size();
-
-    //     processChain(threadId, FWD, i, std::views::iota(start, end) |
-    //     std::ranges::views::reverse); processChain(threadId, BWD, i,
-    //     std::views::iota(start, end));
-    //   }, numThreads);
     for (; p < paths.size(); ++p) {
       const std::size_t start = 0;
       const std::size_t end = paths[p].size();
 
-      processChain(0, FWD, p,
+      processChain(0, FWD, p, 0,
                    std::views::iota(start, end) | std::ranges::views::reverse);
-      processChain(0, BWD, p, std::views::iota(start, end));
+      processChain(0, BWD, p, 0, std::views::iota(start, end));
     }
   }
 
@@ -273,14 +264,14 @@ class PPLSimd {
     std::atomic<std::size_t> minLength{std::numeric_limits<std::size_t>::max()};
     std::atomic<std::size_t> maxLength{0};
     std::atomic<std::size_t> totalLength{0};
-    std::vector<std::size_t> pathLengths(totalPaths);
+    // std::vector<std::size_t> pathLengths(totalPaths);
 
     parallelFor(
         0, totalPaths,
         [&](const std::size_t, const std::size_t i) {
           const auto& path = paths[i];
           std::size_t length = path.size();
-          pathLengths[i] = length;
+          // pathLengths[i] = length;
 
           fetch_min(minLength, length);
           fetch_max(maxLength, length);
@@ -306,6 +297,7 @@ class PPLSimd {
   }
 
   void buildEdgesSortedTopo() {
+    StatusLog log("Build and sort edges topologically");
     edges.clear();
     edges.reserve(graphs[FWD]->numEdges());
 

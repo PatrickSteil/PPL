@@ -9,6 +9,7 @@
 #include <atomic>
 #include <bit>
 #include <bitset>
+#include <chrono>
 #include <concepts>
 #include <functional>
 #include <iostream>
@@ -322,4 +323,13 @@ bool intersect_delta(Iterator A_begin, Iterator A_end, Iterator B_begin,
   }
 
   return val_A == val_B;
+}
+
+template <typename FUNC>
+double timeExecution(FUNC &&func) {
+  auto start = std::chrono::high_resolution_clock::now();
+  func();
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> duration = end - start;
+  return duration.count();
 }

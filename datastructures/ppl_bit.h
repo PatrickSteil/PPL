@@ -31,6 +31,8 @@ class PPLBit {
 
   using BFSVariant = std::variant<bfs::TBFS<FWD>, bfs::TBFS<BWD>>;
   std::array<BFSVariant, 2> bfs;
+  std::array<bfs::BFS, 2> bfsNormal;
+
   std::array<std::vector<std::uint16_t>, 2> bestPosToPath;
 
   std::vector<std::vector<Vertex>> paths;
@@ -44,6 +46,7 @@ class PPLBit {
         topoSorter(*fwdGraph),
         rank(graphs[FWD]->numVertices()),
         bfs{bfs::TBFS<FWD>(*fwdGraph), bfs::TBFS<BWD>(*bwdGraph)},
+        bfsNormal{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)},
         bestPosToPath{
             std::vector<std::uint16_t>(fwdGraph->numVertices(), 0),
             std::vector<std::uint16_t>(bwdGraph->numVertices(), noPathPos)},
@@ -95,7 +98,8 @@ class PPLBit {
   void run() {
     StatusLog log("Computing Path Labels");
 
-    auto processChain = [&](const DIRECTION dir, const std::size_t p) -> void {
+    auto processChainTopo = [&](const DIRECTION dir,
+                                const std::size_t p) -> void {
       const std::vector<Vertex>& path = paths[p];
 
       std::visit(
@@ -144,13 +148,55 @@ class PPLBit {
           bfs[dir]);
     };
 
-    for (std::size_t p = 0; p < paths.size(); ++p) {
-      std::fill(bestPosToPath[FWD].begin(), bestPosToPath[FWD].end(), 0);
-      std::fill(bestPosToPath[BWD].begin(), bestPosToPath[BWD].end(),
-                noPathPos);
+    auto processChain = [&](const DIRECTION dir, const std::size_t p,
+                            auto range) -> void {
+      bfsNormal[dir].resetSeen();
 
-      processChain(FWD, p);
-      processChain(BWD, p);
+      for (std::size_t i : range) {
+        Vertex root = paths[p][i];
+
+        bfsNormal[dir].template run<false>(
+            root, bfs::noOp, [&](const Vertex, const Vertex to) {
+              Vertex fromVertex = (dir == FWD ? root : to);
+              Vertex toVertex = (dir == FWD ? to : root);
+
+              return (query(labels[FWD][fromVertex], labels[BWD][toVertex]));
+            });
+
+        bfsNormal[dir].doForAllVerticesInQ([&](const Vertex v) {
+          assert(v < labels[!dir].size());
+          labels[!dir][v].emplace_back(p, i);
+          labels[!dir][v].sort();
+        });
+      }
+    };
+
+    std::size_t p = 0;
+    for (; p < (paths.size() >> 7); ++p) {
+      auto time = timeExecution([&]() {
+        std::fill(bestPosToPath[FWD].begin(), bestPosToPath[FWD].end(), 0);
+        std::fill(bestPosToPath[BWD].begin(), bestPosToPath[BWD].end(),
+                  noPathPos);
+
+        processChainTopo(FWD, p);
+        processChainTopo(BWD, p);
+      });
+
+      std::cout << "TOPO," << p << "," << paths[p].size() << "," << time
+                << std::endl;
+    }
+
+    for (; p < paths.size(); ++p) {
+      auto time = timeExecution([&]() {
+        const std::size_t start = 0;
+        const std::size_t end = paths[p].size();
+
+        processChain(
+            FWD, p, std::views::iota(start, end) | std::ranges::views::reverse);
+        processChain(BWD, p, std::views::iota(start, end));
+      });
+      std::cout << "BFS," << p << "," << paths[p].size() << "," << time
+                << std::endl;
     }
   }
 

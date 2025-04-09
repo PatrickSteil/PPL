@@ -12,13 +12,13 @@
 #include <utility>
 
 #include "datastructures/graph.h"
-#include "datastructures/ppl.h"
+#include "datastructures/ppl_simd.h"
 #include "external/cmdparser.hpp"
 
 void configure_parser(cli::Parser &parser) {
   parser.set_required<std::string>("i", "input_graph", "Input graph file.");
-  parser.set_optional<std::string>(
-      "p", "path_file", "", "File to write the path decomposition into.");
+  parser.set_optional<std::string>("p", "path_file", "",
+                                   "File to read the path decomposition from.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
   parser.set_optional<int>("t", "num_threads",
@@ -27,7 +27,7 @@ void configure_parser(cli::Parser &parser) {
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
-                            "Run 100 000 random vertex-to-vertex queries.");
+                            "Run 100000 random vertex-to-vertex queries.");
 };
 
 int main(int argc, char *argv[]) {
@@ -41,8 +41,8 @@ int main(int argc, char *argv[]) {
   parser.run_and_exit_if_error();
 
   const std::string inputFileName = parser.get<std::string>("i");
+  const std::string inputPathFile = parser.get<std::string>("p");
   const std::string outputFileName = parser.get<std::string>("o");
-  const std::string outputPathFile = parser.get<std::string>("p");
   const int numThreads = parser.get<int>("t");
   const bool showstats = parser.get<bool>("s");
   const bool run_benchmark = parser.get<bool>("b");
@@ -54,14 +54,17 @@ int main(int argc, char *argv[]) {
 
   Graph bwdGraph = g.reverseGraph();
 
-  PPL ppl(&g, &bwdGraph, numThreads);
+  PPLSimd<ThreadSafePathLabel> ppl(&g, &bwdGraph, numThreads);
 
-  ppl.chainDecomposition();
+  if (inputPathFile != "") {
+    ppl.paths = loadPathFile(inputPathFile);
+  } else {
+    // ppl.chainDecomposition();
+  }
+
   ppl.sortPaths();
 
   if (showstats) ppl.showPathStats();
-
-  if (outputPathFile != "") saveToFile(ppl.paths, outputPathFile);
 
   ppl.run();
 

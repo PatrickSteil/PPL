@@ -454,7 +454,7 @@ Time plt_query(const TimeTable& tt, std::array<std::vector<PATHLABEL_TYPE>, 2>&,
   assert(to < tt.numberOfStops());
 
   if (from == to) return depTime;
-
+  // TODO
   return infinity;
 }
 

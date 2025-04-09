@@ -35,6 +35,8 @@ class PPL {
 
   const int numThreads;
 
+  std::size_t numberOfAddedHubs{0};
+
   PPL(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
         labels{std::vector<PATHLABEL_TYPE>(fwdGraph->numVertices()),
@@ -70,6 +72,23 @@ class PPL {
         numThreads);
   }
 
+  void reorderByRank() {
+    graphs[FWD]->reorderByRank(rank);
+    graphs[BWD]->reorderByRank(rank);
+
+    parallelFor(
+        0, paths.size(),
+        [&](const std::size_t, const std::size_t p) {
+          auto& path = paths[p];
+          for (auto& v : path) {
+            v = rank[v];
+          }
+
+          std::sort(path.begin(), path.end());
+        },
+        numThreads);
+  }
+
   void run() {
     StatusLog log("Computing Path Labels");
 
@@ -92,17 +111,24 @@ class PPL {
           assert(v < labels[!dir].size());
           labels[!dir][v].emplace_back(p, i);
           labels[!dir][v].sort();
+
+          // numberOfAddedHubs++;
         });
       }
     };
 
     for (std::uint32_t p = 0; p < paths.size(); ++p) {
+      // auto time = timeExecution([&]() {
       const std::size_t start = 0;
       const std::size_t end = paths[p].size();
 
       processChain(FWD, p,
                    std::views::iota(start, end) | std::ranges::views::reverse);
       processChain(BWD, p, std::views::iota(start, end));
+      // });
+
+      // std::cout << p << "," << paths[p].size() << "," << numberOfAddedHubs <<
+      // "," << time << std::endl;
     }
   }
 
@@ -316,14 +342,14 @@ class PPL {
     std::atomic<std::size_t> minLength{std::numeric_limits<std::size_t>::max()};
     std::atomic<std::size_t> maxLength{0};
     std::atomic<std::size_t> totalLength{0};
-    std::vector<std::size_t> pathLengths(totalPaths);
+    // std::vector<std::size_t> pathLengths(totalPaths);
 
     parallelFor(
         0, totalPaths,
         [&](const std::size_t, const std::size_t i) {
           const auto& path = paths[i];
           std::size_t length = path.size();
-          pathLengths[i] = length;
+          // pathLengths[i] = length;
 
           fetch_min(minLength, length);
           fetch_max(maxLength, length);
@@ -333,20 +359,19 @@ class PPL {
 
     double avgLength = static_cast<double>(totalLength.load()) / totalPaths;
 
-    std::sort(pathLengths.begin(), pathLengths.end());
-
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
     std::cout << "  Min Length:     " << minLength.load() << "\n";
     std::cout << "  Max Length:     " << maxLength.load() << "\n";
     std::cout << "  Average Length: " << avgLength << "\n";
 
-    std::cout << "  Percentiles:\n";
-    for (int p = 10; p <= 90; p += 10) {
-      std::size_t index = (p * totalPaths) / 100;
-      if (index >= totalPaths) index = totalPaths - 1;
-      std::cout << "    " << p << "%: " << pathLengths[index] << "\n";
-    }
+    // std::sort(pathLengths.begin(), pathLengths.end());
+    // std::cout << "  Percentiles:\n";
+    // for (int p = 10; p <= 90; p += 10) {
+    //   std::size_t index = (p * totalPaths) / 100;
+    //   if (index >= totalPaths) index = totalPaths - 1;
+    //   std::cout << "    " << p << "%: " << pathLengths[index] << "\n";
+    // }
   }
 
   void computePaths() {

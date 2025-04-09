@@ -25,6 +25,7 @@
 #include <tuple>
 #include <vector>
 
+#include "spinlock.h"
 #include "types.h"
 #include "utils.h"
 
@@ -99,10 +100,101 @@ struct PathLabel {
   }
 };
 
+// class ThreadSafePathLabel {
+//  public:
+//   std::vector<PathHub> hubs;
+//   mutable std::mutex m;
+
+//   ThreadSafePathLabel() = default;
+
+//   explicit ThreadSafePathLabel(const std::vector<PathHub>& init_hubs)
+//       : hubs(init_hubs) {}
+
+//   explicit ThreadSafePathLabel(std::vector<PathHub>&& init_hubs)
+//       : hubs(std::move(init_hubs)) {}
+
+//   ThreadSafePathLabel(const ThreadSafePathLabel& other) {
+//     std::lock_guard<std::mutex> lock(other.m);
+//     hubs = other.hubs;
+//   }
+
+//   ThreadSafePathLabel& operator=(const ThreadSafePathLabel& other) {
+//     if (this != &other) {
+//       std::scoped_lock lock(m, other.m);
+//       hubs = other.hubs;
+//     }
+//     return *this;
+//   }
+
+//   ThreadSafePathLabel(ThreadSafePathLabel&& other) noexcept {
+//     std::lock_guard<std::mutex> lock(other.m);
+//     hubs = std::move(other.hubs);
+//   }
+
+//   ThreadSafePathLabel& operator=(ThreadSafePathLabel&& other) noexcept {
+//     if (this != &other) {
+//       std::scoped_lock lock(m, other.m);
+//       hubs = std::move(other.hubs);
+//     }
+//     return *this;
+//   }
+
+//   PathHub get(size_t index) const {
+//     std::lock_guard<std::mutex> lock(m);
+//     assert(index < hubs.size() && "Index out of bounds in
+//     ThreadSafePathLabel"); return hubs[index];
+//   }
+
+//   size_t size() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs.size();
+//   }
+
+//   bool empty() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs.empty();
+//   }
+
+//   void push_back(const PathHub& label) {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.push_back(label);
+//   }
+
+//   void emplace_back(const std::uint32_t path_id, const std::uint32_t
+//   path_pos) {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.emplace_back(path_id, path_pos);
+//   }
+
+//   void sort() {
+//     std::lock_guard<std::mutex> lock(m);
+//     std::sort(hubs.begin(), hubs.end());
+//   }
+
+//   void clear() {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.clear();
+//   }
+
+//   std::vector<PathHub> get_snapshot() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs;
+//   }
+
+//   template <typename Func>
+//   auto doForAllHubs(Func&& func) {
+//     std::lock_guard<std::mutex> lock(m);
+//     for (auto hub : hubs) {
+//       func(hub);
+//     }
+//   }
+// };
+
+// The thread-safe container now using Spinlock.
 class ThreadSafePathLabel {
  public:
   std::vector<PathHub> hubs;
-  mutable std::mutex m;
+  mutable Spinlock m;  // Use our custom spinlock
 
   ThreadSafePathLabel() = default;
 
@@ -112,77 +204,97 @@ class ThreadSafePathLabel {
   explicit ThreadSafePathLabel(std::vector<PathHub>&& init_hubs)
       : hubs(std::move(init_hubs)) {}
 
+  // Copy constructor: lock the other object's spinlock during copying.
   ThreadSafePathLabel(const ThreadSafePathLabel& other) {
-    std::lock_guard<std::mutex> lock(other.m);
+    SpinlockGuard lock(other.m);
     hubs = other.hubs;
   }
 
+  // Copy assignment: lock both spinlocks in a consistent order to avoid
+  // deadlocks.
   ThreadSafePathLabel& operator=(const ThreadSafePathLabel& other) {
     if (this != &other) {
-      std::scoped_lock lock(m, other.m);
-      hubs = other.hubs;
+      if (std::addressof(m) < std::addressof(other.m)) {
+        SpinlockGuard lock1(m);
+        SpinlockGuard lock2(other.m);
+        hubs = other.hubs;
+      } else {
+        SpinlockGuard lock1(other.m);
+        SpinlockGuard lock2(m);
+        hubs = other.hubs;
+      }
     }
     return *this;
   }
 
+  // Move constructor: lock the other object's spinlock during moving.
   ThreadSafePathLabel(ThreadSafePathLabel&& other) noexcept {
-    std::lock_guard<std::mutex> lock(other.m);
+    SpinlockGuard lock(other.m);
     hubs = std::move(other.hubs);
   }
 
+  // Move assignment: lock both spinlocks in a defined order to avoid deadlocks.
   ThreadSafePathLabel& operator=(ThreadSafePathLabel&& other) noexcept {
     if (this != &other) {
-      std::scoped_lock lock(m, other.m);
-      hubs = std::move(other.hubs);
+      if (std::addressof(m) < std::addressof(other.m)) {
+        SpinlockGuard lock1(m);
+        SpinlockGuard lock2(other.m);
+        hubs = std::move(other.hubs);
+      } else {
+        SpinlockGuard lock1(other.m);
+        SpinlockGuard lock2(m);
+        hubs = std::move(other.hubs);
+      }
     }
     return *this;
   }
 
   PathHub get(size_t index) const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     assert(index < hubs.size() && "Index out of bounds in ThreadSafePathLabel");
     return hubs[index];
   }
 
   size_t size() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs.size();
   }
 
   bool empty() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs.empty();
   }
 
   void push_back(const PathHub& label) {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     hubs.push_back(label);
   }
 
   void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     hubs.emplace_back(path_id, path_pos);
   }
 
   void sort() {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     std::sort(hubs.begin(), hubs.end());
   }
 
   void clear() {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     hubs.clear();
   }
 
   std::vector<PathHub> get_snapshot() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs;
   }
 
+  // Applies a function object to every hub.
   template <typename Func>
   auto doForAllHubs(Func&& func) {
-    std::lock_guard<std::mutex> lock(m);
-    for (auto hub : hubs) {
+    SpinlockGuard lock(m);
+    for (auto& hub : hubs) {  // Passing by reference may allow modifications.
       func(hub);
     }
   }
@@ -388,7 +500,7 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string& fileName) {
     std::vector<Vertex> path;
     Vertex v;
     while (lineStream >> v) {
-      path.push_back(v);
+      path.push_back(v - 1);
     }
     paths.push_back(std::move(path));
   }
@@ -411,7 +523,7 @@ void saveToFile(const std::vector<std::vector<Vertex>>& paths,
   for (const auto& path : paths) {
     std::ostringstream lineStream;
     for (Vertex v : path) {
-      lineStream << v << " ";
+      lineStream << (v + 1) << " ";
     }
     outFile << lineStream.str() << "\n";
   }

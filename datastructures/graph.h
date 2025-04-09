@@ -350,7 +350,6 @@ struct Graph {
     }
 
     return std::all_of(seen.begin(), seen.end(), [](bool val) { return val; });
-    ;
   }
 
   void reorderByRank(const std::vector<std::size_t> &rank) {

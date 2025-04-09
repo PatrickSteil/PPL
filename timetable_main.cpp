@@ -11,8 +11,8 @@
 #include <thread>
 #include <utility>
 
-// #include "datastructures/ppl.h"
-#include "datastructures/ppl_bit.h"
+#include "datastructures/ppl.h"
+// #include "datastructures/ppl_bit.h"
 #include "datastructures/timetable.h"
 #include "external/cmdparser.hpp"
 
@@ -24,6 +24,9 @@ void configure_parser(cli::Parser &parser) {
   parser.set_optional<std::string>(
       "d", "output_dimacs_teg", "",
       "Output file to save the time exapnded graph as DIMACS.");
+  parser.set_optional<std::string>(
+      "p", "output_path_decomposition", "",
+      "Output file to save the path decomposition into.");
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
@@ -33,7 +36,7 @@ void configure_parser(cli::Parser &parser) {
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
-                            "Run 100 000 random vertex-to-vertex queries.");
+                            "Run 100000 random vertex-to-vertex queries.");
 };
 
 int main(int argc, char *argv[]) {
@@ -51,6 +54,8 @@ int main(int argc, char *argv[]) {
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string outputFileName = parser.get<std::string>("o");
   const std::string outputFileNameDimacs = parser.get<std::string>("d");
+  const std::string outputFileNamePathDecomposition =
+      parser.get<std::string>("p");
   const int numThreads = parser.get<int>("t");
   const bool contract = parser.get<bool>("c");
   const bool showstats = parser.get<bool>("s");
@@ -63,10 +68,10 @@ int main(int argc, char *argv[]) {
   if (contract) tt.contract();
   if (showstats) tt.showStats();
 
-  PPLBit ppl(&tt.transferGraphs[FWD], &tt.transferGraphs[BWD], numThreads);
+  PPL ppl(&tt.transferGraphs[FWD], &tt.transferGraphs[BWD], numThreads);
   ppl.paths = tt.eventsOfStop;
 
-  ppl.reorderByRank();
+  // ppl.reorderByRank();
   ppl.sortPaths(RankingMethod::SUM);
 
   if (showstats) ppl.showPathStats();
@@ -81,6 +86,9 @@ int main(int argc, char *argv[]) {
 
   if (outputFileNameDimacs != "")
     tt.transferGraphs[FWD].toDimacs(outputFileNameDimacs);
+
+  if (outputFileNamePathDecomposition != "")
+    saveToFile(tt.eventsOfStop, outputFileNamePathDecomposition);
 
   return 0;
 }
