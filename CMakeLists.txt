@@ -13,6 +13,8 @@ set(CMAKE_CXX_FLAGS_DEBUG "-Werror -Wpedantic -pedantic-errors -Wall -Wextra -g 
 set(CMAKE_CXX_FLAGS_SANITIZE "-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1")
 set(CMAKE_LINKER_FLAGS_SANITIZE "-fsanitize=address,undefined")
 
+add_compile_options(-Wno-gnu-anonymous-struct -Wno-nested-anon-types)
+
 if(CMAKE_BUILD_TYPE STREQUAL "Sanitize")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_SANITIZE}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS_SANITIZE}")
@@ -31,7 +33,7 @@ find_package(GTest)
 if(GTest_FOUND)
     add_executable(unit_test 
         tests/bit_vector_test.cpp 
-        tests/simd_tools_test.cpp 
+        tests/simd_test.cpp 
         tests/bfs_tools_test.cpp 
         tests/graph_test.cpp 
         tests/path_labels_test.cpp 

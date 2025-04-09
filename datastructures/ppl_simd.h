@@ -5,9 +5,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <execution>
 #include <numeric>
 #include <ranges>
 #include <stack>
@@ -15,13 +17,15 @@
 #include <vector>
 
 #include "bfs.h"
+#include "bit_vector.h"
 #include "chain.h"
 #include "graph.h"
 #include "path_labels.h"
-#include "simd_tools.h"
+#include "simd.h"
 #include "topological_sort.h"
 
-template <typename PATHLABEL_TYPE = ThreadSafePathLabel>
+template <typename PATHLABEL_TYPE = ThreadSafePathLabel,
+          typename SIMD_HOLDER = simd<128>>
 class PPLSimd {
  public:
   std::array<Graph*, 2> graphs;
@@ -34,10 +38,11 @@ class PPLSimd {
 
   std::vector<std::vector<Vertex>> paths;
 
-  std::array<std::vector<simd_u16x8>, 2> pathReachability;
+  std::array<std::vector<SIMD_HOLDER>, 2> pathReachability;
   std::vector<std::pair<Vertex, Vertex>> edges;
 
   const int numThreads;
+  const int width;
 
   PPLSimd(Graph* fwdGraph, Graph* bwdGraph, const int numberOfThreads = 1)
       : graphs{fwdGraph, bwdGraph},
@@ -48,10 +53,11 @@ class PPLSimd {
         bfs(numberOfThreads,
             std::array<bfs::BFS, 2>{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)}),
         paths(),
-        pathReachability{std::vector<simd_u16x8>(fwdGraph->numVertices()),
-                         std::vector<simd_u16x8>(fwdGraph->numVertices())},
+        pathReachability{std::vector<SIMD_HOLDER>(fwdGraph->numVertices()),
+                         std::vector<SIMD_HOLDER>(fwdGraph->numVertices())},
         edges(),
-        numThreads(numberOfThreads) {
+        numThreads(numberOfThreads),
+        width(SIMD_HOLDER::lanes) {
     parallelFor(
         0, rank.size(),
         [&](const std::size_t, const std::size_t r) {
@@ -127,12 +133,13 @@ class PPLSimd {
     };
 
     std::size_t p = 0;
+    const std::size_t end = (paths.size() >> 4);
 
-    for (const std::size_t end = (paths.size() >> 4); p + 8 <= end; p += 8) {
+    for (; p + width <= end; p += width) {
       topoSweep(p);
 
       parallelFor(
-          0, 8,
+          0, width,
           [&](const std::size_t threadId, const std::size_t i) {
             const std::size_t start = 0;
             const std::size_t end = paths[p + i].size();
@@ -315,7 +322,7 @@ class PPLSimd {
   void topoSweep(std::size_t nextPathId) {
     clearReachability();
 
-    parallelFor(0, 8, [&](const std::size_t, const std::size_t i = 0) {
+    parallelFor(0, width, [&](const std::size_t, const std::size_t i = 0) {
       assert(nextPathId + i < paths.size());
       const auto& path = paths[nextPathId + i];
 

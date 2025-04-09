@@ -1,6 +1,7 @@
 #pragma once
 
 #include <time.h>
+
 #include <atomic>
 
 // Spinlock implementation (from Fedor Pikus)

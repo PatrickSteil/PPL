@@ -1,7 +1,0 @@
-[submodule "external/gheap"]
-	path = external/gheap
-	url = https://github.com/valyala/gheap
-	branch = sophisticated-gheap
-[submodule "external/radix-heap"]
-	path = external/radix-heap
-	url = https://github.com/PatrickSteil/radix-heap.git
