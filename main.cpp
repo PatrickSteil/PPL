@@ -11,9 +11,10 @@
 #include <thread>
 #include <utility>
 
-#include "datastructures/graph.h"
-#include "datastructures/ppl_simd.h"
-#include "external/cmdparser.hpp"
+#include "cmdparser.hpp"
+#include "csv_status_log.h"
+#include "graph.h"
+#include "ppl_simd.h"
 
 void configure_parser(cli::Parser &parser) {
   parser.set_required<std::string>("i", "input_graph", "Input graph file.");
@@ -21,6 +22,8 @@ void configure_parser(cli::Parser &parser) {
                                    "File to read the path decomposition from.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
+  parser.set_optional<std::string>("l", "log_file", "status_ppl.log",
+                                   "Output file to write the logs into.");
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
@@ -31,9 +34,10 @@ void configure_parser(cli::Parser &parser) {
 };
 
 int main(int argc, char *argv[]) {
+
   cli::Parser parser(
       argc, argv,
-      "Pruned Path Labeling (TT_PPL).\nThe "
+      "Pruned Path Labeling (PPL).\nThe "
       "paths are processed by importance (here: weighted sum of "
       "vertices).\nThis program can compute pathlabels, execute random queries "
       "and show the overall memory consumption.");
@@ -43,9 +47,12 @@ int main(int argc, char *argv[]) {
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string inputPathFile = parser.get<std::string>("p");
   const std::string outputFileName = parser.get<std::string>("o");
+  const std::string outputLogFileName = parser.get<std::string>("l");
   const int numThreads = parser.get<int>("t");
   const bool showstats = parser.get<bool>("s");
   const bool run_benchmark = parser.get<bool>("b");
+
+  CSVStatusLog::init(outputLogFileName);
 
   Graph g;
   g.readDimacs(inputFileName);

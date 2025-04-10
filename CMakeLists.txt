@@ -43,7 +43,7 @@ if(GTest_FOUND)
         tests/path_labels_test.cpp 
         tests/chain_test.cpp 
     )
-    target_include_directories(unit_test PUBLIC datastructures)
+    target_include_directories(unit_test PUBLIC datastructures external)
     target_link_libraries(unit_test PRIVATE GTest::gtest_main)
     # target_compile_options(unit_test PRIVATE -fopenmp)
     add_test(NAME unit_test COMMAND unit_test)

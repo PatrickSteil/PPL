@@ -191,3 +191,22 @@ bool prune(const SIMD_HOLDER &left, const SIMD_HOLDER &right,
   }
   return result;
 }
+
+template <>
+bool prune<simd<512>>(const simd<512> &left, const simd<512> &right,
+                      const std::size_t offset) {
+  assert(offset <= simd<512>::lanes);
+  __m256i min_lo = _mm256_min_epu16(left.lo, right.lo);
+  __m256i cmp_lo = _mm256_cmpeq_epi16(left.lo, min_lo);
+  int mask_lo = _mm256_movemask_epi8(cmp_lo);
+  __m256i min_hi = _mm256_min_epu16(left.hi, right.hi);
+  __m256i cmp_hi = _mm256_cmpeq_epi16(left.hi, min_hi);
+  int mask_hi = _mm256_movemask_epi8(cmp_hi);
+  uint64_t combined_mask = ((uint64_t)mask_hi << 32) | (uint32_t)mask_lo;
+  uint64_t offset_mask;
+  if (offset * 2 < 64)
+    offset_mask = ((uint64_t)1 << (offset * 2)) - 1;
+  else
+    offset_mask = 0xFFFFFFFFFFFFFFFFULL;
+  return (combined_mask & offset_mask) != 0;
+}

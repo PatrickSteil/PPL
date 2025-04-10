@@ -20,8 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../external/csv.h"
-#include "../external/status_log.h"
+#include "csv.h"
+#include "csv_status_log.h"
 #include "graph.h"
 #include "types.h"
 #include "utils.h"
@@ -34,16 +34,13 @@ struct Event {
   Time departureTime;
 
   Event(TripID ti, StopPos si, StopID st, Time at, Time dt)
-      : tripId(ti),
-        stopIndex(si),
-        stopId(st),
-        arrivalTime(at),
+      : tripId(ti), stopIndex(si), stopId(st), arrivalTime(at),
         departureTime(dt) {
     assert(arrivalTime <= departureTime);
   }
 
   // Comparison operator based on arrival and departure times.
-  auto operator<=>(const Event& other) const {
+  auto operator<=>(const Event &other) const {
     return std::tie(arrivalTime, departureTime, tripId, stopIndex) <=>
            std::tie(other.arrivalTime, other.departureTime, other.tripId,
                     other.stopIndex);
@@ -63,7 +60,7 @@ struct TimeTable {
   TimeTable(const int numThreads = 1) : numThreads(numThreads) {}
 
   // Constructor that reads timetable data from CSV files.
-  TimeTable(const std::string& fileName, const int numThreads = 1)
+  TimeTable(const std::string &fileName, const int numThreads = 1)
       : numThreads(numThreads) {
     readFromCSV(fileName);
   }
@@ -84,9 +81,9 @@ struct TimeTable {
 
   // Applies a function to relax all footpath edges for a given stop.
   template <typename Func>
-  void relaxFootpathEdges(const StopID stopId, Func&& function) {
+  void relaxFootpathEdges(const StopID stopId, Func &&function) {
     assert(stopId < numberOfStops());
-    for (auto& p : footpaths[stopId]) {
+    for (auto &p : footpaths[stopId]) {
       function(stopId, p.first, p.second);
     }
   }
@@ -133,15 +130,16 @@ struct TimeTable {
   }
 
   void contract() {
-    StatusLog log("Compress Data");
+    CSVStatusLog log("Compress Data");
 
     const std::size_t oldNumVertices = numberOfEvents() * 2;
     std::vector<Vertex> oldToNewMapping(oldNumVertices, 0);
     std::size_t newId = 0;
 
     for (StopID s = 0; s < numberOfStops(); ++s) {
-      auto& vec = eventsOfStop[s];
-      if (vec.empty()) continue;
+      auto &vec = eventsOfStop[s];
+      if (vec.empty())
+        continue;
 
       oldToNewMapping[vec[0]] = newId++;
       Time prevTime = getTime(vec[0]);
@@ -176,7 +174,8 @@ struct TimeTable {
       Vertex fromVertex = oldToNewMapping[u];
       Vertex toVertex = oldToNewMapping[v];
 
-      if (fromVertex == toVertex) return;
+      if (fromVertex == toVertex)
+        return;
 
       if (std::forward_as_tuple(times[fromVertex], fromVertex) >
           std::forward_as_tuple(times[toVertex], toVertex)) {
@@ -191,8 +190,8 @@ struct TimeTable {
     transferGraphs[BWD] = transferGraphs[FWD].reverseGraph();
 
     for (StopID s = 0; s < numberOfStops(); ++s) {
-      auto& vec = eventsOfStop[s];
-      for (auto& v : vec) {
+      auto &vec = eventsOfStop[s];
+      for (auto &v : vec) {
         v = oldToNewMapping[v];
       }
       sortAndRemoveDuplicates(vec);
@@ -203,7 +202,7 @@ struct TimeTable {
 
   // Build Time Expanded Graph (TEGraph)
   void buildTEGraph() {
-    StatusLog log("Build Time Expanded Graph");
+    CSVStatusLog log("Build Time Expanded Graph");
 
     const std::size_t numTEVertices = numberOfEvents() * 2;
 
@@ -214,7 +213,7 @@ struct TimeTable {
     parallelFor(
         0, numberOfStops(),
         [&](const std::size_t, const std::size_t s) {
-          const auto& vecVertices = eventsOfStop[s];
+          const auto &vecVertices = eventsOfStop[s];
           assert(std::is_sorted(vecVertices.begin(), vecVertices.end(),
                                 [&](const auto left, const auto right) {
                                   return lessOrEqual(left, right);
@@ -232,7 +231,7 @@ struct TimeTable {
     parallelFor(
         0, numberOfTrips(),
         [&](const std::size_t, const std::size_t t) {
-          const auto& tripEvents = trips[t];
+          const auto &tripEvents = trips[t];
           for (std::size_t i = 1; i < tripEvents.size(); ++i) {
             Vertex from = (tripEvents[i - 1] << 1) + 1;
             Vertex to = (tripEvents[i] << 1);
@@ -273,10 +272,10 @@ struct TimeTable {
     parallelFor(
         0, numberOfStops(),
         [&](const std::size_t threadId, const std::size_t s) {
-          auto& localMap = threadLocalMap[threadId];
+          auto &localMap = threadLocalMap[threadId];
           localMap.clear();
 
-          const auto& vecVertices = eventsOfStop[s];
+          const auto &vecVertices = eventsOfStop[s];
           for (Vertex v : vecVertices | std::views::reverse) {
             Time arrTime = getTime(v);
             relaxFootpathEdges(
@@ -320,8 +319,8 @@ struct TimeTable {
   // **** I/O Functions ****
 
   // Reads the complete timetable from CSV files.
-  void readFromCSV(const std::string& fileName) {
-    StatusLog log("Loading TimeTable from file");
+  void readFromCSV(const std::string &fileName) {
+    CSVStatusLog log("Loading TimeTable from file");
     clear();
 
     readEventsFromCSV(fileName + "/trips.csv");
@@ -332,7 +331,7 @@ struct TimeTable {
   }
 
   // Reads events from a CSV file and organizes them into trips and stops.
-  void readEventsFromCSV(const std::string& fileName) {
+  void readEventsFromCSV(const std::string &fileName) {
     io::CSVReader<5, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
         in(fileName);
     in.read_header(io::ignore_extra_column, "TripId", "StopIndex", "StopId",
@@ -366,7 +365,7 @@ struct TimeTable {
     eventsOfStop.resize(numberOfStops);
 
     for (std::size_t i = 0; i < events.size(); ++i) {
-      const auto& event = events[i];
+      const auto &event = events[i];
       assert(event.stopId < eventsOfStop.size());
       assert(event.tripId < trips.size());
 
@@ -377,7 +376,7 @@ struct TimeTable {
   }
 
   // Reads footpath data.
-  void readFootpathsFromCSV(const std::string& fileName) {
+  void readFootpathsFromCSV(const std::string &fileName) {
     io::CSVReader<3, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
         in(fileName);
     in.read_header(io::ignore_extra_column, "FromStopId", "ToStopId",
@@ -391,7 +390,8 @@ struct TimeTable {
     while (in.read_row(from, to, duration)) {
       assert(from < numberOfStops());
       assert(to < numberOfStops());
-      if (from == to) continue;
+      if (from == to)
+        continue;
       footpaths[from].emplace_back(to, duration);
     }
   }
@@ -401,7 +401,7 @@ struct TimeTable {
     parallelFor(
         0, eventsOfStop.size(),
         [&](const std::size_t, const std::size_t s) {
-          auto& vec = eventsOfStop[s];
+          auto &vec = eventsOfStop[s];
           std::sort(vec.begin(), vec.end(), [&](Vertex a, Vertex b) {
             return std::forward_as_tuple(getTime(a), a) <
                    std::forward_as_tuple(getTime(b), b);
@@ -411,7 +411,7 @@ struct TimeTable {
   }
 
   // Reads transfer graph data from a CSV file and builds the graphs.
-  void readEventGraphFromCSV(const std::string& fileName) {
+  void readEventGraphFromCSV(const std::string &fileName) {
     io::CSVReader<2, io::trim_chars<' '>, io::double_quote_escape<',', '\"'>>
         in(fileName);
     in.read_header(io::ignore_extra_column, "FromVertex", "ToVertex");
@@ -433,7 +433,8 @@ struct TimeTable {
   // Displays basic statistics about the timetable and transfer graph.
   void showStats() const {
     std::size_t totalNumFootpaths = 0;
-    for (auto& f : footpaths) totalNumFootpaths += f.size();
+    for (auto &f : footpaths)
+      totalNumFootpaths += f.size();
 
     std::cout << "TimeTable Statistics:" << std::endl;
     std::cout << "  Number of events:      " << numberOfEvents() << std::endl;
@@ -448,19 +449,21 @@ struct TimeTable {
 // Query
 
 template <class PATHLABEL_TYPE = PathLabel>
-Time plt_query(const TimeTable& tt, std::array<std::vector<PATHLABEL_TYPE>, 2>&,
-               const StopID from, const StopID to, const Time depTime) {
+Time plt_query(const TimeTable &tt,
+               std::array<std::vector<PATHLABEL_TYPE>, 2> &, const StopID from,
+               const StopID to, const Time depTime) {
   assert(from < tt.numberOfStops());
   assert(to < tt.numberOfStops());
 
-  if (from == to) return depTime;
+  if (from == to)
+    return depTime;
   // TODO
   return infinity;
 }
 
 template <class PATHLABEL_TYPE = PathLabel>
-void benchmark_ptl(const TimeTable&& tt,
-                   std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
+void benchmark_ptl(const TimeTable &&tt,
+                   std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
                    const std::size_t numQueries = 100000) {
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -474,7 +477,7 @@ void benchmark_ptl(const TimeTable&& tt,
   long double totalTime(0);
   std::size_t counter(0);
 
-  for (std::pair<StopID, StopID>& paar : queries) {
+  for (std::pair<StopID, StopID> &paar : queries) {
     auto t1 = high_resolution_clock::now();
     counter += plt_query(tt, labels, paar.first, paar.second, 8 * 60 * 60);
     auto t2 = high_resolution_clock::now();

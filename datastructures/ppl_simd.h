@@ -20,6 +20,7 @@
 #include "bfs.h"
 #include "bit_vector.h"
 #include "chain.h"
+#include "csv_status_log.h"
 #include "graph.h"
 #include "path_labels.h"
 #include "simd.h"
@@ -66,7 +67,7 @@ public:
   void showStats() { showLabelStats(labels); }
 
   void clear() {
-    StatusLog log("Clear Datastructures");
+    CSVStatusLog log("Clear Datastructures");
 
     assert(labels[FWD].size() == labels[BWD].size());
     assert(labels[FWD].size() == graphs[FWD]->numVertices());
@@ -90,7 +91,7 @@ public:
   }
 
   void run() {
-    StatusLog log("Computing Path Labels");
+    CSVStatusLog log("Computing Path Labels");
 
     auto processChain = [&](const std::size_t threadId, const DIRECTION dir,
                             const std::size_t pStart, const std::size_t offset,
@@ -251,6 +252,7 @@ public:
   }
 
   void showPathStats() {
+    CSVStatusLog log("Compute Path Stats");
     if (paths.empty()) {
       std::cout << "No paths available.\n";
       return;
@@ -277,6 +279,11 @@ public:
 
     double avgLength = static_cast<double>(totalLength.load()) / totalPaths;
 
+    log["Total Paths"] = totalPaths;
+    log["Min Length"] = minLength.load();
+    log["Max Length"] = maxLength.load();
+    log["Avg Length"] = avgLength;
+
     std::cout << "Path Statistics:\n";
     std::cout << "  Total Paths:    " << totalPaths << "\n";
     std::cout << "  Min Length:     " << minLength.load() << "\n";
@@ -293,7 +300,7 @@ public:
   }
 
   void buildEdgesSortedTopo() {
-    StatusLog log("Build and sort edges topologically");
+    CSVStatusLog log("Build and sort edges topologically");
     edges.clear();
     edges.reserve(graphs[FWD]->numEdges());
 
