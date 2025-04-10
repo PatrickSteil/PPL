@@ -50,11 +50,12 @@ int main(int argc, char *argv[]) {
   Graph g;
   g.readDimacs(inputFileName);
 
-  if (showstats) g.showStats();
+  if (showstats)
+    g.showStats();
 
   Graph bwdGraph = g.reverseGraph();
 
-  PPLSimd<ThreadSafePathLabel> ppl(&g, &bwdGraph, numThreads);
+  PPLSimd<simd<256>> ppl(&g, &bwdGraph, numThreads);
 
   if (inputPathFile != "") {
     ppl.paths = loadPathFile(inputPathFile);
@@ -64,15 +65,19 @@ int main(int argc, char *argv[]) {
 
   ppl.sortPaths();
 
-  if (showstats) ppl.showPathStats();
+  if (showstats)
+    ppl.showPathStats();
 
   ppl.run();
 
-  if (showstats) ppl.showStats();
+  if (showstats)
+    ppl.showStats();
 
-  if (outputFileName != "") saveToFile(ppl.labels, outputFileName);
+  if (outputFileName != "")
+    saveToFile(ppl.labels, outputFileName);
 
-  if (run_benchmark) benchmark_pathlabels(ppl.labels);
+  if (run_benchmark)
+    benchmark_pathlabels(ppl.labels);
 
   return 0;
 }

@@ -5,11 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread -DGHEAP_CPP11")
+set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread -fopenmp")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
 
 set(CMAKE_CXX_FLAGS_RELEASE "-ffast-math -DNDEBUG -O3 -g")
-set(CMAKE_CXX_FLAGS_DEBUG "-Werror -Wpedantic -pedantic-errors -Wall -Wextra -g -fno-omit-frame-pointer -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "-Werror -Wall -Wextra -g -fno-omit-frame-pointer -O0")
 set(CMAKE_CXX_FLAGS_SANITIZE "-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1")
 set(CMAKE_LINKER_FLAGS_SANITIZE "-fsanitize=address,undefined")
 
@@ -26,6 +26,10 @@ target_include_directories(PPL PUBLIC datastructures external)
 
 add_executable(TT_PPL timetable_main.cpp)
 target_include_directories(TT_PPL PUBLIC datastructures external)
+
+find_package(TBB REQUIRED)
+target_link_libraries(PPL PRIVATE TBB::tbb)
+target_link_libraries(TT_PPL PRIVATE TBB::tbb)
 
 enable_testing()
 find_package(GTest)
