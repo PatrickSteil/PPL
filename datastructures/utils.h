@@ -9,6 +9,7 @@
 #include <atomic>
 #include <bit>
 #include <bitset>
+#include <chrono>
 #include <concepts>
 #include <functional>
 #include <iostream>
@@ -232,6 +233,17 @@ bool fetch_max(std::atomic<T> &atomicValue, T newValue) {
 }
 
 template <typename T>
+bool fetch_min(std::atomic<T> &atomicValue, T newValue) {
+  T oldValue = atomicValue.load();
+  while (newValue < oldValue) {
+    if (atomicValue.compare_exchange_weak(oldValue, newValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename T>
 bool intersect(const std::vector<T> &A, const std::vector<T> &B) {
   assert(std::is_sorted(A.begin(), A.end()));
   assert(std::is_sorted(B.begin(), B.end()));
@@ -311,4 +323,13 @@ bool intersect_delta(Iterator A_begin, Iterator A_end, Iterator B_begin,
   }
 
   return val_A == val_B;
+}
+
+template <typename FUNC>
+double timeExecution(FUNC &&func) {
+  auto start = std::chrono::high_resolution_clock::now();
+  func();
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> duration = end - start;
+  return duration.count();
 }

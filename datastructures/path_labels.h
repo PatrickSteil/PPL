@@ -25,6 +25,8 @@
 #include <tuple>
 #include <vector>
 
+#include "csv_status_log.h"
+#include "spinlock.h"
 #include "types.h"
 #include "utils.h"
 
@@ -40,15 +42,15 @@ struct PathHub {
   std::uint16_t getPath() const { return path_id; }
   std::uint16_t getPathPos() const { return path_pos; }
 
-  bool isOnSamePath(const PathHub& other) const {
+  bool isOnSamePath(const PathHub &other) const {
     return (path_id == other.getPath());
   }
 
-  bool isReachable(const PathHub& other) const {
+  bool isReachable(const PathHub &other) const {
     return (path_id == other.getPath() && path_pos <= other.getPathPos());
   }
 
-  auto operator<=>(const PathHub&) const = default;
+  auto operator<=>(const PathHub &) const = default;
 };
 
 // Holds a vector of PathHub entries.
@@ -57,27 +59,27 @@ struct PathLabel {
 
   PathLabel() = default;
 
-  explicit PathLabel(const std::vector<PathHub>& init_hubs) : hubs(init_hubs) {}
+  explicit PathLabel(const std::vector<PathHub> &init_hubs) : hubs(init_hubs) {}
 
-  explicit PathLabel(std::vector<PathHub>&& init_hubs)
+  explicit PathLabel(std::vector<PathHub> &&init_hubs)
       : hubs(std::move(init_hubs)) {}
 
-  PathLabel(const PathLabel& other) = default;
-  PathLabel& operator=(const PathLabel& other) = default;
-  PathLabel& operator=(PathLabel&& other) noexcept = default;
+  PathLabel(const PathLabel &other) = default;
+  PathLabel &operator=(const PathLabel &other) = default;
+  PathLabel &operator=(PathLabel &&other) noexcept = default;
 
-  PathHub& operator[](size_t index) {
+  PathHub &operator[](size_t index) {
     assert(index < hubs.size() && "Index out of bounds in PathLabel");
     return hubs[index];
   }
-  const PathHub& operator[](size_t index) const {
+  const PathHub &operator[](size_t index) const {
     assert(index < hubs.size() && "Index out of bounds in PathLabel");
     return hubs[index];
   }
 
   size_t size() const { return hubs.size(); }
   bool empty() const { return hubs.empty(); }
-  void push_back(const PathHub& label) { hubs.push_back(label); }
+  void push_back(const PathHub &label) { hubs.push_back(label); }
   void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
     hubs.emplace_back(path_id, path_pos);
   }
@@ -91,111 +93,220 @@ struct PathLabel {
 
   void clear() { hubs.clear(); }
 
-  template <typename Func>
-  auto doForAllHubs(Func&& func) {
+  template <typename Func> auto doForAllHubs(Func &&func) {
     for (auto hub : hubs) {
       func(hub);
     }
   }
 };
 
+// class ThreadSafePathLabel {
+//  public:
+//   std::vector<PathHub> hubs;
+//   mutable std::mutex m;
+
+//   ThreadSafePathLabel() = default;
+
+//   explicit ThreadSafePathLabel(const std::vector<PathHub>& init_hubs)
+//       : hubs(init_hubs) {}
+
+//   explicit ThreadSafePathLabel(std::vector<PathHub>&& init_hubs)
+//       : hubs(std::move(init_hubs)) {}
+
+//   ThreadSafePathLabel(const ThreadSafePathLabel& other) {
+//     std::lock_guard<std::mutex> lock(other.m);
+//     hubs = other.hubs;
+//   }
+
+//   ThreadSafePathLabel& operator=(const ThreadSafePathLabel& other) {
+//     if (this != &other) {
+//       std::scoped_lock lock(m, other.m);
+//       hubs = other.hubs;
+//     }
+//     return *this;
+//   }
+
+//   ThreadSafePathLabel(ThreadSafePathLabel&& other) noexcept {
+//     std::lock_guard<std::mutex> lock(other.m);
+//     hubs = std::move(other.hubs);
+//   }
+
+//   ThreadSafePathLabel& operator=(ThreadSafePathLabel&& other) noexcept {
+//     if (this != &other) {
+//       std::scoped_lock lock(m, other.m);
+//       hubs = std::move(other.hubs);
+//     }
+//     return *this;
+//   }
+
+//   PathHub get(size_t index) const {
+//     std::lock_guard<std::mutex> lock(m);
+//     assert(index < hubs.size() && "Index out of bounds in
+//     ThreadSafePathLabel"); return hubs[index];
+//   }
+
+//   size_t size() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs.size();
+//   }
+
+//   bool empty() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs.empty();
+//   }
+
+//   void push_back(const PathHub& label) {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.push_back(label);
+//   }
+
+//   void emplace_back(const std::uint32_t path_id, const std::uint32_t
+//   path_pos) {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.emplace_back(path_id, path_pos);
+//   }
+
+//   void sort() {
+//     std::lock_guard<std::mutex> lock(m);
+//     std::sort(hubs.begin(), hubs.end());
+//   }
+
+//   void clear() {
+//     std::lock_guard<std::mutex> lock(m);
+//     hubs.clear();
+//   }
+
+//   std::vector<PathHub> get_snapshot() const {
+//     std::lock_guard<std::mutex> lock(m);
+//     return hubs;
+//   }
+
+//   template <typename Func>
+//   auto doForAllHubs(Func&& func) {
+//     std::lock_guard<std::mutex> lock(m);
+//     for (auto hub : hubs) {
+//       func(hub);
+//     }
+//   }
+// };
+
+// The thread-safe container now using Spinlock.
 class ThreadSafePathLabel {
- public:
+public:
   std::vector<PathHub> hubs;
-  mutable std::mutex m;
+  mutable Spinlock m; // Use our custom spinlock
 
   ThreadSafePathLabel() = default;
 
-  explicit ThreadSafePathLabel(const std::vector<PathHub>& init_hubs)
+  explicit ThreadSafePathLabel(const std::vector<PathHub> &init_hubs)
       : hubs(init_hubs) {}
 
-  explicit ThreadSafePathLabel(std::vector<PathHub>&& init_hubs)
+  explicit ThreadSafePathLabel(std::vector<PathHub> &&init_hubs)
       : hubs(std::move(init_hubs)) {}
 
-  ThreadSafePathLabel(const ThreadSafePathLabel& other) {
-    std::lock_guard<std::mutex> lock(other.m);
+  // Copy constructor: lock the other object's spinlock during copying.
+  ThreadSafePathLabel(const ThreadSafePathLabel &other) {
+    SpinlockGuard lock(other.m);
     hubs = other.hubs;
   }
 
-  ThreadSafePathLabel& operator=(const ThreadSafePathLabel& other) {
+  // Copy assignment: lock both spinlocks in a consistent order to avoid
+  // deadlocks.
+  ThreadSafePathLabel &operator=(const ThreadSafePathLabel &other) {
     if (this != &other) {
-      std::scoped_lock lock(m, other.m);
-      hubs = other.hubs;
+      if (std::addressof(m) < std::addressof(other.m)) {
+        SpinlockGuard lock1(m);
+        SpinlockGuard lock2(other.m);
+        hubs = other.hubs;
+      } else {
+        SpinlockGuard lock1(other.m);
+        SpinlockGuard lock2(m);
+        hubs = other.hubs;
+      }
     }
     return *this;
   }
 
-  ThreadSafePathLabel(ThreadSafePathLabel&& other) noexcept {
-    std::lock_guard<std::mutex> lock(other.m);
+  // Move constructor: lock the other object's spinlock during moving.
+  ThreadSafePathLabel(ThreadSafePathLabel &&other) noexcept {
+    SpinlockGuard lock(other.m);
     hubs = std::move(other.hubs);
   }
 
-  ThreadSafePathLabel& operator=(ThreadSafePathLabel&& other) noexcept {
+  // Move assignment: lock both spinlocks in a defined order to avoid deadlocks.
+  ThreadSafePathLabel &operator=(ThreadSafePathLabel &&other) noexcept {
     if (this != &other) {
-      std::scoped_lock lock(m, other.m);
-      hubs = std::move(other.hubs);
+      if (std::addressof(m) < std::addressof(other.m)) {
+        SpinlockGuard lock1(m);
+        SpinlockGuard lock2(other.m);
+        hubs = std::move(other.hubs);
+      } else {
+        SpinlockGuard lock1(other.m);
+        SpinlockGuard lock2(m);
+        hubs = std::move(other.hubs);
+      }
     }
     return *this;
   }
 
   PathHub get(size_t index) const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     assert(index < hubs.size() && "Index out of bounds in ThreadSafePathLabel");
     return hubs[index];
   }
 
   size_t size() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs.size();
   }
 
   bool empty() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs.empty();
   }
 
-  void push_back(const PathHub& label) {
-    std::lock_guard<std::mutex> lock(m);
+  void push_back(const PathHub &label) {
+    SpinlockGuard lock(m);
     hubs.push_back(label);
   }
 
   void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     hubs.emplace_back(path_id, path_pos);
   }
 
   void sort() {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     std::sort(hubs.begin(), hubs.end());
   }
 
   void clear() {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     hubs.clear();
   }
 
   std::vector<PathHub> get_snapshot() const {
-    std::lock_guard<std::mutex> lock(m);
+    SpinlockGuard lock(m);
     return hubs;
   }
 
-  template <typename Func>
-  auto doForAllHubs(Func&& func) {
-    std::lock_guard<std::mutex> lock(m);
-    for (auto hub : hubs) {
+  // Applies a function object to every hub.
+  template <typename Func> auto doForAllHubs(Func &&func) {
+    SpinlockGuard lock(m);
+    for (auto &hub : hubs) { // Passing by reference may allow modifications.
       func(hub);
     }
   }
 };
 
-bool query(const PathLabel& from, const PathLabel& to) {
+bool query(const PathLabel &from, const PathLabel &to) {
   std::size_t i = 0, j = 0;
   const std::size_t fsize = from.size();
   const std::size_t tsize = to.size();
 
   while (i < fsize && j < tsize) {
-    const auto& srcHub = from[i];
-    const auto& tgtHub = to[j];
+    const auto &srcHub = from[i];
+    const auto &tgtHub = to[j];
 
     if (srcHub.getPath() < tgtHub.getPath()) {
       ++i;
@@ -212,7 +323,7 @@ bool query(const PathLabel& from, const PathLabel& to) {
   return false;
 }
 
-bool query(const ThreadSafePathLabel& from, const ThreadSafePathLabel& to) {
+bool query(const ThreadSafePathLabel &from, const ThreadSafePathLabel &to) {
   std::scoped_lock lock(from.m, to.m);
 
   const std::size_t fsize = from.hubs.size();
@@ -220,8 +331,8 @@ bool query(const ThreadSafePathLabel& from, const ThreadSafePathLabel& to) {
 
   std::size_t i = 0, j = 0;
   while (i < fsize && j < tsize) {
-    const auto& srcHub = from.hubs[i];
-    const auto& tgtHub = to.hubs[j];
+    const auto &srcHub = from.hubs[i];
+    const auto &tgtHub = to.hubs[j];
 
     if (srcHub.getPath() < tgtHub.getPath()) {
       ++i;
@@ -239,7 +350,7 @@ bool query(const ThreadSafePathLabel& from, const ThreadSafePathLabel& to) {
 }
 
 template <class PATHLABEL_TYPE = PathLabel>
-void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
+void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
                           const std::size_t numQueries = 100000) {
   using std::chrono::duration;
   using std::chrono::duration_cast;
@@ -253,7 +364,7 @@ void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
   long double totalTime(0);
   std::size_t counter(0);
 
-  for (std::pair<Vertex, Vertex>& paar : queries) {
+  for (std::pair<Vertex, Vertex> &paar : queries) {
     auto t1 = high_resolution_clock::now();
     counter += query(labels[FWD][paar.first], labels[BWD][paar.second]);
     auto t2 = high_resolution_clock::now();
@@ -269,11 +380,11 @@ void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
 
 // **** Stats ****
 template <class PATHLABEL_TYPE = PathLabel>
-std::size_t computeTotalBytes(
-    const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
+std::size_t
+computeTotalBytes(const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
   std::size_t totalBytes = 0;
-  for (const auto& labelSet : labels) {
-    for (const auto& label : labelSet) {
+  for (const auto &labelSet : labels) {
+    for (const auto &label : labelSet) {
       totalBytes += sizeof(PATHLABEL_TYPE);
       totalBytes += label.size() * sizeof(decltype(PathHub{}.path_id));
       totalBytes += label.size() * sizeof(decltype(PathHub{}.path_pos));
@@ -283,11 +394,13 @@ std::size_t computeTotalBytes(
 }
 
 template <class PATHLABEL_TYPE = PathLabel>
-void showLabelStats(const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
-  auto computeStats = [](const std::vector<PATHLABEL_TYPE>& currentLabels) {
+void showLabelStats(const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
+  CSVStatusLog log("Compute Label Stats");
+
+  auto computeStats = [](const std::vector<PATHLABEL_TYPE> &currentLabels) {
     std::size_t minSize = std::numeric_limits<std::size_t>::max();
     std::size_t maxSize = 0, totalSize = 0;
-    for (const auto& label : currentLabels) {
+    for (const auto &label : currentLabels) {
       std::size_t size = label.size();
       minSize = std::min(minSize, size);
       maxSize = std::max(maxSize, size);
@@ -299,6 +412,20 @@ void showLabelStats(const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
 
   auto [inMin, inMax, inAvg, inTotal] = computeStats(labels[BWD]);
   auto [outMin, outMax, outAvg, outTotal] = computeStats(labels[FWD]);
+
+  log["FWD Min"] = outMin;
+  log["FWD Max"] = outMax;
+  log["FWD Avg"] = outAvg;
+  log["FWD Total"] = outTotal;
+
+  log["BWD Min"] = inMin;
+  log["BWD Max"] = inMax;
+  log["BWD Avg"] = inAvg;
+  log["BWD Total"] = inTotal;
+
+  double memSize =
+      static_cast<double>(computeTotalBytes(labels) / (1024.0 * 1024.0));
+  log["Memory [mb]"] = memSize;
 
   std::cout << "Forward Labels Statistics:" << std::endl;
   std::cout << "  Min Size:     " << outMin << std::endl;
@@ -315,16 +442,13 @@ void showLabelStats(const std::array<std::vector<PATHLABEL_TYPE>, 2>& labels) {
   std::cout << "Both # count:   " << (outTotal + inTotal) << std::endl;
 
   std::cout << "Total memory consumption [megabytes]:" << std::endl;
-  std::cout << "  "
-            << static_cast<double>(computeTotalBytes(labels) /
-                                   (1024.0 * 1024.0))
-            << std::endl;
+  std::cout << "  " << memSize << std::endl;
 }
 
 /// **** IO ****
 template <class PATHLABEL_TYPE = PathLabel>
-void saveToFile(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
-                const std::string& fileName) {
+void saveToFile(std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
+                const std::string &fileName) {
   std::ofstream outFile(fileName);
   if (!outFile.is_open()) {
     std::cerr << "Error: Unable to open file " << fileName << " for writing.\n";
@@ -336,13 +460,13 @@ void saveToFile(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
 
   for (std::size_t v = 0; v < N; ++v) {
     outFile << "o " << v;
-    labels[FWD][v].doForAllHubs([&](const auto& hub) {
+    labels[FWD][v].doForAllHubs([&](const auto &hub) {
       outFile << " " << hub.getPath() << " " << hub.getPathPos();
     });
     outFile << "\n";
 
     outFile << "i " << v;
-    labels[BWD][v].doForAllHubs([&](const auto& hub) {
+    labels[BWD][v].doForAllHubs([&](const auto &hub) {
       outFile << " " << hub.getPath() << " " << hub.getPathPos();
     });
     outFile << "\n";
@@ -356,7 +480,7 @@ void saveToFile(std::array<std::vector<PATHLABEL_TYPE>, 2>& labels,
   }
 }
 
-std::vector<std::vector<Vertex>> loadPathFile(const std::string& fileName) {
+std::vector<std::vector<Vertex>> loadPathFile(const std::string &fileName) {
   std::ifstream inFile(fileName);
   if (!inFile.is_open()) {
     std::cerr << "Error: Unable to open file " << fileName << "\n";
@@ -382,13 +506,14 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string& fileName) {
   paths.reserve(numPaths);
 
   while (std::getline(inFile, line)) {
-    if (line.empty()) continue;
+    if (line.empty())
+      continue;
 
     std::istringstream lineStream(line);
     std::vector<Vertex> path;
     Vertex v;
     while (lineStream >> v) {
-      path.push_back(v);
+      path.push_back(v - 1);
     }
     paths.push_back(std::move(path));
   }
@@ -396,8 +521,8 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string& fileName) {
   return paths;
 }
 
-void saveToFile(const std::vector<std::vector<Vertex>>& paths,
-                const std::string& fileName) {
+void saveToFile(const std::vector<std::vector<Vertex>> &paths,
+                const std::string &fileName) {
   std::ofstream outFile(fileName);
   if (!outFile.is_open()) {
     std::cerr << "Error: Unable to open file " << fileName << " for writing.\n";
@@ -408,10 +533,10 @@ void saveToFile(const std::vector<std::vector<Vertex>>& paths,
   outFile << "P " << paths.size() << "\n";
 
   // Write each path on a new line.
-  for (const auto& path : paths) {
+  for (const auto &path : paths) {
     std::ostringstream lineStream;
     for (Vertex v : path) {
-      lineStream << v << " ";
+      lineStream << (v + 1) << " ";
     }
     outFile << lineStream.str() << "\n";
   }

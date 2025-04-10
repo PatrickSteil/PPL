@@ -42,12 +42,12 @@ struct Graph {
   std::vector<std::size_t> adjArray;
   std::vector<Vertex> toVertex;
 
-  Graph() : adjArray(1), toVertex() {};
+  Graph() : adjArray(1), toVertex(){};
   Graph(std::size_t numVertices, std::size_t numEdges)
-      : adjArray(numVertices + 1, 0), toVertex(numEdges, 0) {};
+      : adjArray(numVertices + 1, 0), toVertex(numEdges, 0){};
 
   Graph(const Graph &other)
-      : adjArray(other.adjArray), toVertex(other.toVertex) {};
+      : adjArray(other.adjArray), toVertex(other.toVertex){};
 
   Graph(Graph &&other) noexcept
       : adjArray(std::move(other.adjArray)),
@@ -350,7 +350,6 @@ struct Graph {
     }
 
     return std::all_of(seen.begin(), seen.end(), [](bool val) { return val; });
-    ;
   }
 
   void reorderByRank(const std::vector<std::size_t> &rank) {

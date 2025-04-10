@@ -111,46 +111,45 @@ The output file contains hub labels for all vertices in the graph. Each vertex h
 6.  The total number of lines is `2 × number of vertices + 1`.
 
 ## Example Execution
-### Standard PPL
+### PPL + SIMD + Parallel
 Here is an example of running the PPL algorithm on a graph read from a DIMACS file:
 
 ```bash
-./PPL -i ../example/icice.dimacs -s -b
+./PPL -i ../data/swiss_te.dimacs -p ../data/swiss_paths.txt -s -b
 ```
 
 Example Output:
 
 ```bash
-Reading graph from dimacs ... done [406ms]
+Reading graph from dimacs ... done [4379ms]
 Graph Statistics:
-  Number of vertices:            186068
-  Number of edges:               586679
+  Number of vertices:            5860345
+  Number of edges:               12713790
   Min degree:                    0
-  Max degree:                    19
-  Average degree:                3.15304
-  Number of isolated vertices:   440
-Reversing Graph ... done [7ms]
-Computing Chain Decomposition ... done [75ms]
+  Max degree:                    30
+  Average degree:                2.16946
+  Number of isolated vertices:   1503
+Build and sort edges topologically ... done [1710ms]
 Path Statistics:
-  Total Paths:    7876
+  Total Paths:    29045
   Min Length:     1
-  Max Length:     248
-  Average Length: 23.6247
-Computing Path Labels ... done [7590ms]
+  Max Length:     5020
+  Average Length: 201.768
+Computing Path Labels ... done [175872ms]
 Forward Labels Statistics:
   Min Size:     1
-  Max Size:     193
-  Avg Size:     47.8313
+  Max Size:     227
+  Avg Size:     46.2643
 Backward Labels Statistics:
   Min Size:     1
-  Max Size:     204
-  Avg Size:     56.3595
-FWD # count:    8899866
-BWD # count:    10486706
-Both # count:   19386572
+  Max Size:     211
+  Avg Size:     45.5816
+FWD # count:    271124516
+BWD # count:    267123792
+Both # count:   538248308
 Total memory consumption [megabytes]:
-  82.4714
-The 100000 random queries took in total 4.14783e+07 [ns] and on average 414.783 [ns]! Counter: 38960
+  2410.94
+The 100000 random queries took in total 4.55839e+07 [ns] and on average 455.839 [ns]! Counter: 36558
 ```
 
 ### Timetable Variant (TT_PPL)

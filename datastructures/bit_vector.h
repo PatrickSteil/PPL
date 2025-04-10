@@ -27,6 +27,38 @@ concept UnsignedIntegral = std::is_unsigned_v<T>;
  */
 template <UnsignedIntegral TYPE = uint64_t>
 class BitVector {
+  // Proxy class for non-const access to individual bits.
+  class Reference {
+   private:
+    BitVector* bv;
+    size_t index;
+
+   public:
+    Reference(BitVector* bv, size_t index) : bv(bv), index(index) {}
+
+    // Assignment from bool: sets the bit accordingly.
+    Reference& operator=(bool value) {
+      size_t wi = BitVector::word_index(index);
+      size_t bi = BitVector::bit_index(index);
+      if (value) {
+        bv->data[wi] |= (TYPE(1) << bi);
+      } else {
+        bv->data[wi] &= ~(TYPE(1) << bi);
+      }
+      return *this;
+    }
+
+    // Assignment from another Reference
+    Reference& operator=(const Reference& other) { return *this = bool(other); }
+
+    // Implicit conversion to bool for reading.
+    operator bool() const {
+      size_t wi = BitVector::word_index(index);
+      size_t bi = BitVector::bit_index(index);
+      return (bv->data[wi] >> bi) & 1;
+    }
+  };
+
  private:
   std::vector<TYPE> data;
   size_t size_ = 0;
@@ -101,6 +133,17 @@ class BitVector {
   bool operator[](size_t index) const {
     assert(index < size_);
     return (data[word_index(index)] >> bit_index(index)) & 1;
+  }
+
+  /**
+   * @brief Non-const access to a bit via a proxy Reference object.
+   * Allows assignment such as bv[i] = true.
+   * @param index The index of the bit to access.
+   * @return A Reference proxy object to the specified bit.
+   */
+  Reference operator[](size_t index) {
+    assert(index < size_);
+    return Reference(this, index);
   }
 
   /**

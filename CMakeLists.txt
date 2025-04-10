@@ -5,13 +5,15 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread")
+set(CMAKE_CXX_FLAGS "-pipe -march=native -Wfatal-errors -pthread -fopenmp")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
 
 set(CMAKE_CXX_FLAGS_RELEASE "-ffast-math -DNDEBUG -O3 -g")
-set(CMAKE_CXX_FLAGS_DEBUG "-Werror -Wpedantic -pedantic-errors -Wall -Wextra -g -fno-omit-frame-pointer -O0")
+set(CMAKE_CXX_FLAGS_DEBUG "-Werror -Wall -Wextra -g -fno-omit-frame-pointer -O0")
 set(CMAKE_CXX_FLAGS_SANITIZE "-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1")
 set(CMAKE_LINKER_FLAGS_SANITIZE "-fsanitize=address,undefined")
+
+add_compile_options(-Wno-gnu-anonymous-struct -Wno-nested-anon-types)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Sanitize")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_SANITIZE}")
@@ -20,10 +22,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Sanitize")
 endif()
 
 add_executable(PPL main.cpp)
-target_include_directories(PPL PUBLIC datastructures)
+target_include_directories(PPL PUBLIC datastructures external)
 
 add_executable(TT_PPL timetable_main.cpp)
-target_include_directories(TT_PPL PUBLIC datastructures)
+target_include_directories(TT_PPL PUBLIC datastructures external)
+
+find_package(TBB REQUIRED)
+target_link_libraries(PPL PRIVATE TBB::tbb)
+target_link_libraries(TT_PPL PRIVATE TBB::tbb)
 
 enable_testing()
 find_package(GTest)
@@ -31,12 +37,13 @@ find_package(GTest)
 if(GTest_FOUND)
     add_executable(unit_test 
         tests/bit_vector_test.cpp 
+        tests/simd_test.cpp 
         tests/bfs_tools_test.cpp 
         tests/graph_test.cpp 
         tests/path_labels_test.cpp 
         tests/chain_test.cpp 
     )
-    target_include_directories(unit_test PUBLIC datastructures)
+    target_include_directories(unit_test PUBLIC datastructures external)
     target_link_libraries(unit_test PRIVATE GTest::gtest_main)
     # target_compile_options(unit_test PRIVATE -fopenmp)
     add_test(NAME unit_test COMMAND unit_test)
