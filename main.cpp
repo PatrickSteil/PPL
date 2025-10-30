@@ -14,11 +14,13 @@
 #include "cmdparser.hpp"
 #include "csv_status_log.h"
 #include "graph.h"
+#include "iterative_centrality.h"
+#include "layoutgraph.h"
 #include "ppl_simd.h"
 
 void configure_parser(cli::Parser &parser) {
   parser.set_required<std::string>("i", "input_graph", "Input graph file.");
-  parser.set_optional<std::string>("p", "path_file", "",
+  parser.set_required<std::string>("p", "path_file",
                                    "File to read the path decomposition from.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
@@ -34,7 +36,6 @@ void configure_parser(cli::Parser &parser) {
 };
 
 int main(int argc, char *argv[]) {
-
   cli::Parser parser(
       argc, argv,
       "Pruned Path Labeling (PPL).\nThe "
@@ -62,23 +63,28 @@ int main(int argc, char *argv[]) {
 
   Graph bwdGraph = g.reverseGraph();
 
-  PPLSimd<simd<256>> ppl(&g, &bwdGraph, numThreads);
+  PPLSimd<simd<512>> ppl(&g, &bwdGraph, numThreads);
 
-  if (inputPathFile != "") {
-    ppl.paths = loadPathFile(inputPathFile);
-  } else {
-    // ppl.chainDecomposition();
-  }
-
+  ppl.paths = loadPathFile(inputPathFile);
   ppl.sortPaths();
 
   if (showstats)
     ppl.showPathStats();
 
+  Graph layoutGraph = createLayoutGraph(ppl);
+  IterativeCentrality centrality(layoutGraph);
+
+  centrality.run(20);
+
+  for (auto &v : centrality.getOrder())
+    std::cout << v << std::endl;
+  return 0;
   ppl.run();
 
   if (showstats)
     ppl.showStats();
+
+  computeStopLabels(ppl);
 
   if (outputFileName != "")
     saveToFile(ppl.labels, outputFileName);
