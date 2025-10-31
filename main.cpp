@@ -73,12 +73,9 @@ int main(int argc, char *argv[]) {
 
   Graph layoutGraph = createLayoutGraph(ppl);
   IterativeCentrality centrality(layoutGraph);
+  centrality.run(50);
+  ppl.sortByOrder(centrality.getOrder());
 
-  centrality.run(20);
-
-  for (auto &v : centrality.getOrder())
-    std::cout << v << std::endl;
-  return 0;
   ppl.run();
 
   if (showstats)

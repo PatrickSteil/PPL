@@ -6,7 +6,6 @@
 #pragma once
 
 #include "bfs.h"
-#include "bit_vector.h"
 #include "graph.h"
 #include "status_log.h"
 
@@ -28,7 +27,7 @@ struct IterativeCentrality {
   std::vector<std::vector<Vertex>> predecessors;
   std::vector<Vertex> stack;
   std::vector<Vertex> order;
-  BitVector<uint64_t> removed;
+  std::vector<bool> removed;
 
   std::mt19937 rng{std::random_device{}()};
 
@@ -36,7 +35,7 @@ struct IterativeCentrality {
       : graph(graph), q(graph.numVertices()), distance(graph.numVertices()),
         sigma(graph.numVertices()), delta(graph.numVertices()),
         value(graph.numVertices(), 0.0), predecessors(graph.numVertices()),
-        stack(), order(), removed(graph.numVertices()) {}
+        stack(), order(), removed(graph.numVertices(), false) {}
 
   std::vector<Vertex> &getOrder() { return order; }
 
@@ -50,8 +49,8 @@ struct IterativeCentrality {
     StatusLog log("Computing Iterative Centrality");
     order.clear();
     order.reserve(graph.numVertices());
-    removed.clear();
-    removed.resize(graph.numVertices());
+
+    std::fill(removed.begin(), removed.end(), false);
 
     const std::size_t n = graph.numVertices();
     std::uniform_int_distribution<std::size_t> dist(0, n - 1);
@@ -59,7 +58,6 @@ struct IterativeCentrality {
     while (order.size() != n) {
       resetStructures();
 
-      // --- 1) Approximate betweenness using sampleSize sources ---
       for (int sample = 0; sample < sampleSize; ++sample) {
         Vertex s = dist(rng);
         while (removed[s])
@@ -68,7 +66,6 @@ struct IterativeCentrality {
         bfsPhase(s);
       }
 
-      // --- 2) Pick the vertex with the highest value ---
       double maxValue = -1.0;
       std::vector<Vertex> candidates;
       for (Vertex v = 0; v < n; ++v) {
@@ -87,7 +84,6 @@ struct IterativeCentrality {
       Vertex chosen = candidates[std::uniform_int_distribution<std::size_t>(
           0, candidates.size() - 1)(rng)];
 
-      // --- 3) Append vertex to order and mark removed ---
       order.push_back(chosen);
       removed[chosen] = true;
     }
