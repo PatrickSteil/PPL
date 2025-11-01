@@ -24,11 +24,16 @@ void configure_parser(cli::Parser &parser) {
                                    "File to read the path decomposition from.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
+  parser.set_optional<std::string>(
+      "g", "output_layout_graph", "",
+      "Output file to save the layout graph as DIMCAS..");
   parser.set_optional<std::string>("l", "log_file", "status_ppl.log",
                                    "Output file to write the logs into.");
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
+  parser.set_optional<double>("d", "damping", 0.5,
+                           "Damping factor");
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
@@ -48,8 +53,10 @@ int main(int argc, char *argv[]) {
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string inputPathFile = parser.get<std::string>("p");
   const std::string outputFileName = parser.get<std::string>("o");
+  const std::string outputLayoutgraph = parser.get<std::string>("g");
   const std::string outputLogFileName = parser.get<std::string>("l");
   const int numThreads = parser.get<int>("t");
+  const double damping = parser.get<double>("d");
   const bool showstats = parser.get<bool>("s");
   const bool run_benchmark = parser.get<bool>("b");
 
@@ -66,14 +73,18 @@ int main(int argc, char *argv[]) {
   PPLSimd<simd<512>> ppl(&g, &bwdGraph, numThreads);
 
   ppl.paths = loadPathFile(inputPathFile);
-  ppl.sortPaths();
+  /* ppl.sortPaths(); */
 
   if (showstats)
     ppl.showPathStats();
 
   Graph layoutGraph = createLayoutGraph(ppl);
+
+  if (outputLayoutgraph != "")
+    layoutGraph.toDimacs(outputLayoutgraph);
+
   IterativeCentrality centrality(layoutGraph);
-  centrality.run(50);
+  centrality.run(256, numThreads, damping);
   ppl.sortByOrder(centrality.getOrder());
 
   ppl.run();
@@ -81,7 +92,7 @@ int main(int argc, char *argv[]) {
   if (showstats)
     ppl.showStats();
 
-  computeStopLabels(ppl);
+  /* computeStopLabels(ppl); */
 
   if (outputFileName != "")
     saveToFile(ppl.labels, outputFileName);

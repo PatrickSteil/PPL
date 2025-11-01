@@ -33,8 +33,6 @@ template <typename PPL_CLASS> static Graph createLayoutGraph(PPL_CLASS &ppl) {
     edges.emplace_back(lookupVertices[to], lookupVertices[from]);
   });
 
-  sortAndRemoveDuplicates(edges);
-
   Graph layoutGraph;
   layoutGraph.buildFromEdgeList(edges, numVertices);
 
