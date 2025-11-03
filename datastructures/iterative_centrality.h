@@ -100,7 +100,7 @@ struct IterativeCentrality {
       order.push_back(chosen);
       removed[chosen] = true;
 
-      graph.relaxAllEdges(chosen, [&](const Vertex from, const Vertex to) {
+      graph.relaxAllEdges(chosen, [&](const Vertex /* from */, const Vertex to) {
         if (!removed[to]) {
           value[to] *= dampingFactor;
         }
