@@ -80,7 +80,7 @@ struct PathLabel {
   size_t size() const { return hubs.size(); }
   bool empty() const { return hubs.empty(); }
   void push_back(const PathHub &label) { hubs.push_back(label); }
-  void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
+  void emplace_back(const std::uint16_t path_id, const std::uint16_t path_pos) {
     hubs.emplace_back(path_id, path_pos);
   }
 
@@ -160,7 +160,7 @@ struct PathLabel {
 //     hubs.push_back(label);
 //   }
 
-//   void emplace_back(const std::uint32_t path_id, const std::uint32_t
+//   void emplace_back(const std::uint16_t path_id, const std::uint16_t
 //   path_pos) {
 //     std::lock_guard<std::mutex> lock(m);
 //     hubs.emplace_back(path_id, path_pos);
@@ -270,7 +270,7 @@ public:
     hubs.push_back(label);
   }
 
-  void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
+  void emplace_back(const std::uint16_t path_id, const std::uint16_t path_pos) {
     SpinlockGuard lock(m);
     hubs.emplace_back(path_id, path_pos);
   }
@@ -352,29 +352,22 @@ bool query(const ThreadSafePathLabel &from, const ThreadSafePathLabel &to) {
 template <class PATHLABEL_TYPE = PathLabel>
 void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
                           const std::size_t numQueries = 100000) {
-  using std::chrono::duration;
-  using std::chrono::duration_cast;
-  using std::chrono::high_resolution_clock;
-  using std::chrono::milliseconds;
-
+  using clock = std::chrono::high_resolution_clock;
+  using ns = std::chrono::nanoseconds;
   assert(labels[FWD].size() == labels[BWD].size());
 
   auto queries =
       generateRandomQueries<Vertex>(numQueries, 0, labels[FWD].size());
-  long double totalTime(0);
-  std::size_t counter(0);
+  std::size_t counter = 0;
 
-  for (std::pair<Vertex, Vertex> &paar : queries) {
-    auto t1 = high_resolution_clock::now();
-    counter += query(labels[FWD][paar.first], labels[BWD][paar.second]);
-    auto t2 = high_resolution_clock::now();
-    duration<double, std::nano> nano_double = t2 - t1;
-    totalTime += nano_double.count();
-  }
+  auto t1 = clock::now();
+  for (const auto &[u, v] : queries)
+    counter += query(labels[FWD][u], labels[BWD][v]);
+  auto t2 = clock::now();
 
-  std::cout << "The " << numQueries << " random queries took in total "
-            << totalTime << " [ns] and on average "
-            << (double)(totalTime / numQueries) << " [ns]! Counter: " << counter
+  double total_ns = std::chrono::duration_cast<ns>(t2 - t1).count();
+  std::cout << numQueries << " queries: total " << total_ns << " ns, avg "
+            << (total_ns / numQueries) << " ns/query, counter=" << counter
             << "\n";
 }
 
