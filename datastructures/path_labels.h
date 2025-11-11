@@ -305,6 +305,12 @@ bool query(const PathLabel &from, const PathLabel &to) {
   const std::size_t tsize = to.size();
 
   while (i < fsize && j < tsize) {
+    if (i + 4 < fsize) {
+      PREFETCH(&from[i + 4]);
+    }
+    if (j + 4 < tsize) {
+      PREFETCH(&to[j + 4]);
+    }
     const auto &srcHub = from[i];
     const auto &tgtHub = to[j];
 
@@ -331,6 +337,12 @@ bool query(const ThreadSafePathLabel &from, const ThreadSafePathLabel &to) {
 
   std::size_t i = 0, j = 0;
   while (i < fsize && j < tsize) {
+    if (i + 4 < fsize) {
+      PREFETCH(&from.hubs[i + 4]);
+    }
+    if (j + 4 < tsize) {
+      PREFETCH(&to.hubs[j + 4]);
+    }
     const auto &srcHub = from.hubs[i];
     const auto &tgtHub = to.hubs[j];
 
