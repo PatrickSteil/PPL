@@ -32,8 +32,7 @@ void configure_parser(cli::Parser &parser) {
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
-  parser.set_optional<double>("d", "damping", 0.5,
-                           "Damping factor");
+  parser.set_optional<double>("d", "damping", 0.5, "Damping factor");
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
@@ -84,7 +83,7 @@ int main(int argc, char *argv[]) {
     layoutGraph.toDimacs(outputLayoutgraph);
 
   IterativeCentrality centrality(layoutGraph);
-  centrality.run(256, numThreads, damping);
+  centrality.run(512, numThreads, damping);
   ppl.sortByOrder(centrality.getOrder());
 
   ppl.run();
