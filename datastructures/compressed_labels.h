@@ -20,7 +20,7 @@
 #include "utils.h"
 
 class CompressedLabels {
- public:
+public:
   std::array<DeltaFlatBuffer, 2> pathIds;
   std::array<std::vector<std::vector<std::uint16_t>>, 2> pathPos;
 
@@ -137,14 +137,15 @@ void benchmark_compressedlabels(const CompressedLabels &compLabels,
                                 const std::size_t numQueries = 100000) {
   using clock = std::chrono::high_resolution_clock;
   using ns = std::chrono::nanoseconds;
-  assert(labels[FWD].size() == labels[BWD].size());
+  assert(compLabels.pathPos[FWD].size() == compLabels.pathPos[BWD].size());
 
   auto queries = generateRandomQueries<Vertex>(numQueries, 0,
                                                compLabels.pathPos[FWD].size());
   std::size_t counter = 0;
 
   auto t1 = clock::now();
-  for (const auto &[u, v] : queries) counter += query(compLabels, u, v);
+  for (const auto &[u, v] : queries)
+    counter += query(compLabels, u, v);
   auto t2 = clock::now();
 
   double total_ns = std::chrono::duration_cast<ns>(t2 - t1).count();
