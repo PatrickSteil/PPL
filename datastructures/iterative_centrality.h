@@ -5,17 +5,18 @@
 
 #pragma once
 
-#include "graph.h"
-#include "status_log.h"
+#include <omp.h>
 
 #include <algorithm>
 #include <cassert>
 #include <numeric>
-#include <omp.h>
 #include <queue>
 #include <random>
 #include <stack>
 #include <vector>
+
+#include "graph.h"
+#include "status_log.h"
 
 struct IterativeCentrality {
   const Graph &graph;
@@ -23,13 +24,15 @@ struct IterativeCentrality {
   std::vector<bool> removed;
   std::vector<double> value;
   std::vector<Vertex> order;
-  std::vector<Vertex> activeVertices; // active vertex pool
+  std::vector<Vertex> activeVertices;  // active vertex pool
 
   std::mt19937 rng{std::random_device{}()};
 
   explicit IterativeCentrality(Graph &graph)
-      : graph(graph), removed(graph.numVertices(), false),
-        value(graph.numVertices(), 0.0), order(),
+      : graph(graph),
+        removed(graph.numVertices(), false),
+        value(graph.numVertices(), 0.0),
+        order(),
         activeVertices(graph.numVertices()) {
     std::iota(activeVertices.begin(), activeVertices.end(), 0);
   }
@@ -76,8 +79,7 @@ struct IterativeCentrality {
 #pragma omp parallel for schedule(static)
       for (std::size_t v = 0; v < n; ++v) {
         double sum = 0.0;
-        for (int t = 0; t < numThreads; ++t)
-          sum += localValues[t][v];
+        for (int t = 0; t < numThreads; ++t) sum += localValues[t][v];
         value[v] = sum;
       }
 
@@ -100,11 +102,12 @@ struct IterativeCentrality {
       order.push_back(chosen);
       removed[chosen] = true;
 
-      graph.relaxAllEdges(chosen, [&](const Vertex /* from */, const Vertex to) {
-        if (!removed[to]) {
-          value[to] *= dampingFactor;
-        }
-      });
+      graph.relaxAllEdges(chosen,
+                          [&](const Vertex /* from */, const Vertex to) {
+                            if (!removed[to]) {
+                              value[to] *= dampingFactor;
+                            }
+                          });
 
       auto it = std::find(activeVertices.begin(), activeVertices.end(), chosen);
       assert(it != activeVertices.end());
@@ -113,7 +116,7 @@ struct IterativeCentrality {
     }
   }
 
-private:
+ private:
   void bfsPhaseThread(Vertex s, std::queue<Vertex> &q,
                       std::vector<std::size_t> &distance,
                       std::vector<std::size_t> &sigma,
@@ -121,15 +124,13 @@ private:
                       std::vector<std::vector<Vertex>> &predecessors,
                       std::vector<Vertex> &stack,
                       std::vector<double> &value) const {
-    while (!q.empty())
-      q.pop();
+    while (!q.empty()) q.pop();
     stack.clear();
 
     std::fill(distance.begin(), distance.end(), static_cast<std::size_t>(-1));
     std::fill(sigma.begin(), sigma.end(), 0);
     std::fill(delta.begin(), delta.end(), 0.0);
-    for (auto &p : predecessors)
-      p.clear();
+    for (auto &p : predecessors) p.clear();
 
     distance[s] = 0;
     sigma[s] = 1;
@@ -142,8 +143,7 @@ private:
       stack.push_back(v);
 
       graph.relaxAllEdges(v, [&](const Vertex from, const Vertex to) {
-        if (removed[to])
-          return;
+        if (removed[to]) return;
         if (distance[to] == static_cast<std::size_t>(-1)) {
           distance[to] = distance[from] + 1;
           q.push(to);
@@ -163,8 +163,7 @@ private:
         delta[v] +=
             (static_cast<double>(sigma[v]) / sigma[w]) * (1.0 + delta[w]);
       }
-      if (w != s)
-        value[w] += delta[w];
+      if (w != s) value[w] += delta[w];
     }
   }
 };

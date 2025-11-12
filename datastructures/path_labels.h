@@ -93,7 +93,8 @@ struct PathLabel {
 
   void clear() { hubs.clear(); }
 
-  template <typename Func> auto doForAllHubs(Func &&func) const {
+  template <typename Func>
+  auto doForAllHubs(Func &&func) const {
     for (const auto &hub : hubs) {
       func(hub);
     }
@@ -192,9 +193,9 @@ struct PathLabel {
 
 // The thread-safe container now using Spinlock.
 class ThreadSafePathLabel {
-public:
+ public:
   std::vector<PathHub> hubs;
-  mutable Spinlock m; // Use our custom spinlock
+  mutable Spinlock m;  // Use our custom spinlock
 
   ThreadSafePathLabel() = default;
 
@@ -291,10 +292,11 @@ public:
   }
 
   // Applies a function object to every hub.
-  template <typename Func> auto doForAllHubs(Func &&func) const {
+  template <typename Func>
+  auto doForAllHubs(Func &&func) const {
     SpinlockGuard lock(m);
     for (const auto &hub :
-         hubs) { // Passing by reference may allow modifications.
+         hubs) {  // Passing by reference may allow modifications.
       func(hub);
     }
   }
@@ -386,8 +388,8 @@ void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
 
 // **** Stats ****
 template <class PATHLABEL_TYPE = PathLabel>
-std::size_t
-computeTotalBytes(const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
+std::size_t computeTotalBytes(
+    const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
   std::size_t totalBytes = 0;
   for (const auto &labelSet : labels) {
     for (const auto &label : labelSet) {
@@ -512,8 +514,7 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string &fileName) {
   paths.reserve(numPaths);
 
   while (std::getline(inFile, line)) {
-    if (line.empty())
-      continue;
+    if (line.empty()) continue;
 
     std::istringstream lineStream(line);
     std::vector<Vertex> path;

@@ -68,8 +68,7 @@ int main(int argc, char *argv[]) {
   Graph g;
   g.readDimacs(inputFileName);
 
-  if (showstats)
-    g.showStats();
+  if (showstats) g.showStats();
 
   Graph bwdGraph = g.reverseGraph();
 
@@ -79,28 +78,23 @@ int main(int argc, char *argv[]) {
   ppl.paths = loadPathFile(inputPathFile);
 
   ppl.sortPaths();
-  if (showstats)
-    ppl.showPathStats();
+  if (showstats) ppl.showPathStats();
 
   Graph layoutGraph = createLayoutGraph(ppl);
 
-  if (outputLayoutgraph != "")
-    layoutGraph.toDimacs(outputLayoutgraph);
+  if (outputLayoutgraph != "") layoutGraph.toDimacs(outputLayoutgraph);
 
   IterativeCentrality centrality(layoutGraph);
-  centrality.run(512, numThreads, damping);
+  centrality.run(256, numThreads, damping);
   ppl.sortByOrder(centrality.getOrder());
 
   ppl.run();
 
-  if (showstats)
-    ppl.showStats();
+  if (showstats) ppl.showStats();
 
-  if (outputFileName != "")
-    saveToFile(ppl.labels, outputFileName);
+  if (outputFileName != "") saveToFile(ppl.labels, outputFileName);
 
-  if (run_benchmark)
-    benchmark_pathlabels(ppl.labels);
+  if (run_benchmark) benchmark_pathlabels(ppl.labels);
 
   if (eval_compressed) {
     CompressedLabels comp;
@@ -108,8 +102,7 @@ int main(int argc, char *argv[]) {
     comp.loadLabels(ppl.labels);
     comp.showStats();
 
-    if (run_benchmark)
-      benchmark_compressedlabels(comp);
+    if (run_benchmark) benchmark_compressedlabels(comp);
   }
   return 0;
 }

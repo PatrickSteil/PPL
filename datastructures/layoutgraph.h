@@ -9,7 +9,8 @@
 
 #include "graph.h"
 
-template <typename PPL_CLASS> static Graph createLayoutGraph(PPL_CLASS &ppl) {
+template <typename PPL_CLASS>
+static Graph createLayoutGraph(PPL_CLASS &ppl) {
   assert(!ppl.paths.empty());
 
   const std::size_t numVertices = ppl.paths.size();
@@ -26,8 +27,7 @@ template <typename PPL_CLASS> static Graph createLayoutGraph(PPL_CLASS &ppl) {
   }
 
   ppl.graphs[FWD]->doForAllEdges([&](const Vertex from, const Vertex to) {
-    if (lookupVertices[from] == lookupVertices[to])
-      return;
+    if (lookupVertices[from] == lookupVertices[to]) return;
 
     edges.emplace_back(lookupVertices[from], lookupVertices[to]);
     edges.emplace_back(lookupVertices[to], lookupVertices[from]);

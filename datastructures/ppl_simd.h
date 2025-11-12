@@ -168,8 +168,7 @@ class PPLSimd {
     std::vector<bool> visited(order.size(), false);
 
     for (std::size_t i = 0; i < order.size(); ++i) {
-      if (visited[i])
-        continue;
+      if (visited[i]) continue;
 
       std::size_t current = i;
       auto tmp = std::move(paths[i]);

@@ -135,25 +135,20 @@ bool query(const CompressedLabels &compLabels, const Vertex source,
 
 void benchmark_compressedlabels(const CompressedLabels &compLabels,
                                 const std::size_t numQueries = 100000) {
-  using std::chrono::duration;
-  using std::chrono::duration_cast;
-  using std::chrono::high_resolution_clock;
-  using std::chrono::milliseconds;
+  using clock = std::chrono::high_resolution_clock;
+  using ns = std::chrono::nanoseconds;
+  assert(labels[FWD].size() == labels[BWD].size());
 
   auto queries = generateRandomQueries<Vertex>(numQueries, 0,
                                                compLabels.pathPos[FWD].size());
-  long double totalTime(0);
-  std::size_t counter(0);
+  std::size_t counter = 0;
 
-  auto t1 = high_resolution_clock::now();
-  for (const std::pair<Vertex, Vertex> &paar : queries) {
-    counter += query(compLabels, paar.first, paar.second);
-  }
-  auto t2 = high_resolution_clock::now();
-  duration<double, std::nano> nano_double = t2 - t1;
-  totalTime += nano_double.count();
-  std::cout << "The " << numQueries << " random queries took in total "
-            << totalTime << " [ns] and on average "
-            << (double)(totalTime / numQueries) << " [ns]! Counter: " << counter
+  auto t1 = clock::now();
+  for (const auto &[u, v] : queries) counter += query(compLabels, u, v);
+  auto t2 = clock::now();
+
+  double total_ns = std::chrono::duration_cast<ns>(t2 - t1).count();
+  std::cout << numQueries << " queries: total " << total_ns << " ns, avg "
+            << (total_ns / numQueries) << " ns/query, counter=" << counter
             << "\n";
 }
