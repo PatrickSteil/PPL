@@ -5,13 +5,14 @@
 
 #pragma once
 
+#include <omp.h>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <execution>
 #include <numeric>
-#include <omp.h>
 #include <ranges>
 #include <stack>
 #include <thread>
@@ -26,8 +27,9 @@
 #include "simd.h"
 #include "topological_sort.h"
 
-template <typename SIMD_HOLDER = simd<256>> class PPLSimd {
-public:
+template <typename SIMD_HOLDER = simd<256>>
+class PPLSimd {
+ public:
   std::array<Graph *, 2> graphs;
   std::array<std::vector<ThreadSafePathLabel>, 2> labels;
 
@@ -48,13 +50,16 @@ public:
       : graphs{fwdGraph, bwdGraph},
         labels{std::vector<ThreadSafePathLabel>(fwdGraph->numVertices()),
                std::vector<ThreadSafePathLabel>(fwdGraph->numVertices())},
-        topoSorter(*fwdGraph), rank(graphs[FWD]->numVertices()),
+        topoSorter(*fwdGraph),
+        rank(graphs[FWD]->numVertices()),
         bfs(numberOfThreads,
             std::array<bfs::BFS, 2>{bfs::BFS(*fwdGraph), bfs::BFS(*bwdGraph)}),
         paths(),
         pathReachability{std::vector<SIMD_HOLDER>(fwdGraph->numVertices()),
                          std::vector<SIMD_HOLDER>(fwdGraph->numVertices())},
-        edges(), numThreads(numberOfThreads), width(SIMD_HOLDER::lanes) {
+        edges(),
+        numThreads(numberOfThreads),
+        width(SIMD_HOLDER::lanes) {
     omp_set_num_threads(numThreads);
 
 #pragma omp parallel for
@@ -171,69 +176,69 @@ public:
 
     // Use a lambda for sorting the paths based on the selected ranking.
     switch (method) {
-    case RankingMethod::LENGTH:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return pathA.size() > pathB.size();
-                });
-      break;
+      case RankingMethod::LENGTH:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return pathA.size() > pathB.size();
+                  });
+        break;
 
-    case RankingMethod::SUM:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeSum(pathA, value) > computeSum(pathB, value);
-                });
-      break;
+      case RankingMethod::SUM:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeSum(pathA, value) > computeSum(pathB, value);
+                  });
+        break;
 
-    case RankingMethod::AVERAGE:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeAverage(pathA, value) >
-                         computeAverage(pathB, value);
-                });
-      break;
+      case RankingMethod::AVERAGE:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeAverage(pathA, value) >
+                           computeAverage(pathB, value);
+                  });
+        break;
 
-    case RankingMethod::MIN:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeMin(pathA, value) > computeMin(pathB, value);
-                });
-      break;
+      case RankingMethod::MIN:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeMin(pathA, value) > computeMin(pathB, value);
+                  });
+        break;
 
-    case RankingMethod::MAX:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeMax(pathA, value) > computeMax(pathB, value);
-                });
-      break;
+      case RankingMethod::MAX:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeMax(pathA, value) > computeMax(pathB, value);
+                  });
+        break;
 
-    case RankingMethod::HYBRID:
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeHybrid(pathA, value) >
-                         computeHybrid(pathB, value);
-                });
-      break;
+      case RankingMethod::HYBRID:
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeHybrid(pathA, value) >
+                           computeHybrid(pathB, value);
+                  });
+        break;
 
-    default:
-      // Fallback to SUM ranking if method is unknown.
-      std::sort(paths.begin(), paths.end(),
-                [&](const std::vector<Vertex> &pathA,
-                    const std::vector<Vertex> &pathB) {
-                  return computeSum(pathA, value) > computeSum(pathB, value);
-                });
-      break;
+      default:
+        // Fallback to SUM ranking if method is unknown.
+        std::sort(paths.begin(), paths.end(),
+                  [&](const std::vector<Vertex> &pathA,
+                      const std::vector<Vertex> &pathB) {
+                    return computeSum(pathA, value) > computeSum(pathB, value);
+                  });
+        break;
     }
   }
 
-  bool
-  verifyPathDecomposition(const std::vector<std::vector<Vertex>> &toVerify) {
+  bool verifyPathDecomposition(
+      const std::vector<std::vector<Vertex>> &toVerify) {
     std::vector<bool> hit(graphs[FWD]->numVertices(), false);
 
     for (auto &p : toVerify) {

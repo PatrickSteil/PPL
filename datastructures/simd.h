@@ -14,21 +14,15 @@
 #include <iostream>
 #include <type_traits>
 
-#include <cassert>
-#include <cstdint>
-#include <emmintrin.h>
-#include <immintrin.h>
-#include <iostream>
-#include <smmintrin.h>
-#include <type_traits>
-
-template <int Bits> struct simd;
+template <int Bits>
+struct simd;
 
 // Specialization for 128 bits.
 // We choose __m128i as the storage. In our example we assume a lane type of
 // std::uint16_t so that the vector contains 8 elements.
-template <> struct simd<128> {
-  static constexpr int lanes = 8; // 128 / 16 = 8 elements
+template <>
+struct simd<128> {
+  static constexpr int lanes = 8;  // 128 / 16 = 8 elements
   union {
     __m128i vec;
     std::uint16_t arr[lanes];
@@ -68,8 +62,7 @@ template <> struct simd<128> {
 
   // Print routine.
   void print() const {
-    for (int i = 0; i < lanes; ++i)
-      std::cout << arr[i] << " ";
+    for (int i = 0; i < lanes; ++i) std::cout << arr[i] << " ";
     std::cout << std::endl;
   }
 };
@@ -77,7 +70,8 @@ template <> struct simd<128> {
 // Specialization for 256 bits.
 // We use __m256i as the underlying type and assume a lane type of
 // std::uint16_t, giving 16 elements (256 / 16).
-template <> struct simd<256> {
+template <>
+struct simd<256> {
   static constexpr int lanes = 16;
   union {
     __m256i vec;
@@ -117,8 +111,7 @@ template <> struct simd<256> {
   }
 
   void print() const {
-    for (int i = 0; i < lanes; ++i)
-      std::cout << arr[i] << " ";
+    for (int i = 0; i < lanes; ++i) std::cout << arr[i] << " ";
     std::cout << std::endl;
   }
 };
@@ -126,7 +119,8 @@ template <> struct simd<256> {
 // Specialization for 512 bits.
 // We represent 512 bits as two __m256i registers. Using 16-bit lanes each,
 // we have 32 elements.
-template <> struct simd<512> {
+template <>
+struct simd<512> {
   static constexpr int lanes = 32;
   union {
     struct {
@@ -175,8 +169,7 @@ template <> struct simd<512> {
   }
 
   void print() const {
-    for (int i = 0; i < lanes; ++i)
-      std::cout << arr[i] << " ";
+    for (int i = 0; i < lanes; ++i) std::cout << arr[i] << " ";
     std::cout << std::endl;
   }
 };

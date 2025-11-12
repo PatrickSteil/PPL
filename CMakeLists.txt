@@ -22,14 +22,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Sanitize")
 endif()
 
 add_executable(PPL main.cpp)
-target_include_directories(PPL PUBLIC datastructures external)
-
-add_executable(TT_PPL timetable_main.cpp)
-target_include_directories(TT_PPL PUBLIC datastructures external)
+target_include_directories(PPL PUBLIC datastructures external external/CompactDeltaVector)
 
 find_package(TBB REQUIRED)
 target_link_libraries(PPL PRIVATE TBB::tbb)
-target_link_libraries(TT_PPL PRIVATE TBB::tbb)
 
 enable_testing()
 find_package(GTest)

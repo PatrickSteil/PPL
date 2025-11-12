@@ -1,0 +1,3 @@
+[submodule "external/CompactDeltaVector"]
+	path = external/CompactDeltaVector
+	url = https://github.com/PatrickSteil/CompactDeltaVector.git

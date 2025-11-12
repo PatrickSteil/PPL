@@ -105,7 +105,8 @@ struct BFS {
   }
 };
 
-// template <DIRECTION dir = FWD, typename FWD_PQ = radix_heap::radix_heap<Vertex>,
+// template <DIRECTION dir = FWD, typename FWD_PQ =
+// radix_heap::radix_heap<Vertex>,
 //           typename BWD_PQ = radix_heap::max_radix_heap<Vertex>>
 // struct TBFS {
 //   using PQ = std::conditional_t<(dir == FWD), FWD_PQ, BWD_PQ>;
@@ -152,7 +153,8 @@ struct BFS {
 
 //       if (onPop(u)) continue;
 
-//       for (std::size_t i = graph.beginEdge(u), end = graph.endEdge(u); i < end;
+//       for (std::size_t i = graph.beginEdge(u), end = graph.endEdge(u); i <
+//       end;
 //            ++i) {
 //         if (i + 4 < end) {
 //           PREFETCH(&graph.toVertex[i + 4]);
@@ -250,7 +252,8 @@ struct BFS {
 //           const Vertex u = q[i];
 //           if (onPop(u)) return;
 
-//           for (std::size_t k = graph.beginEdge(u), endEdge = graph.endEdge(u);
+//           for (std::size_t k = graph.beginEdge(u), endEdge =
+//           graph.endEdge(u);
 //                k < endEdge; ++k) {
 //             if (k + 4 < endEdge) {
 //               PREFETCH(&graph.toVertex[k + 4]);
