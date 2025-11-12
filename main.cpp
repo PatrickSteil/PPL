@@ -15,7 +15,8 @@
 #include "compressed_labels.h"
 #include "csv_status_log.h"
 #include "graph.h"
-#include "ppl.h"
+#include "iterative_centrality.h"
+#include "layoutgraph.h"
 #include "ppl_simd.h"
 
 void configure_parser(cli::Parser &parser) {
@@ -24,11 +25,15 @@ void configure_parser(cli::Parser &parser) {
                                    "File to read the path decomposition from.");
   parser.set_optional<std::string>("o", "output_file", "",
                                    "Output file to save hub labels into.");
+  parser.set_optional<std::string>(
+      "g", "output_layout_graph", "",
+      "Output file to save the layout graph as DIMCAS..");
   parser.set_optional<std::string>("l", "log_file", "status_ppl.log",
                                    "Output file to write the logs into.");
   parser.set_optional<int>("t", "num_threads",
                            std::thread::hardware_concurrency(),
                            "Number of threads to use.");
+  parser.set_optional<double>("d", "damping", 0.5, "Damping factor");
   parser.set_optional<bool>("s", "show_stats", false,
                             "Show statistics about the computed hub labels.");
   parser.set_optional<bool>("b", "benchmark", false,
@@ -50,8 +55,10 @@ int main(int argc, char *argv[]) {
   const std::string inputFileName = parser.get<std::string>("i");
   const std::string inputPathFile = parser.get<std::string>("p");
   const std::string outputFileName = parser.get<std::string>("o");
+  const std::string outputLayoutgraph = parser.get<std::string>("g");
   const std::string outputLogFileName = parser.get<std::string>("l");
   const int numThreads = parser.get<int>("t");
+  const double damping = parser.get<double>("d");
   const bool showstats = parser.get<bool>("s");
   const bool run_benchmark = parser.get<bool>("b");
   const bool eval_compressed = parser.get<bool>("c");
@@ -61,7 +68,8 @@ int main(int argc, char *argv[]) {
   Graph g;
   g.readDimacs(inputFileName);
 
-  if (showstats) g.showStats();
+  if (showstats)
+    g.showStats();
 
   Graph bwdGraph = g.reverseGraph();
 
@@ -71,16 +79,28 @@ int main(int argc, char *argv[]) {
   ppl.paths = loadPathFile(inputPathFile);
 
   ppl.sortPaths();
+  if (showstats)
+    ppl.showPathStats();
 
-  if (showstats) ppl.showPathStats();
+  Graph layoutGraph = createLayoutGraph(ppl);
+
+  if (outputLayoutgraph != "")
+    layoutGraph.toDimacs(outputLayoutgraph);
+
+  IterativeCentrality centrality(layoutGraph);
+  centrality.run(512, numThreads, damping);
+  ppl.sortByOrder(centrality.getOrder());
 
   ppl.run();
 
-  if (showstats) ppl.showStats();
+  if (showstats)
+    ppl.showStats();
 
-  if (outputFileName != "") saveToFile(ppl.labels, outputFileName);
+  if (outputFileName != "")
+    saveToFile(ppl.labels, outputFileName);
 
-  if (run_benchmark) benchmark_pathlabels(ppl.labels);
+  if (run_benchmark)
+    benchmark_pathlabels(ppl.labels);
 
   if (eval_compressed) {
     CompressedLabels comp;
@@ -88,7 +108,8 @@ int main(int argc, char *argv[]) {
     comp.loadLabels(ppl.labels);
     comp.showStats();
 
-    if (run_benchmark) benchmark_compressedlabels(comp);
+    if (run_benchmark)
+      benchmark_compressedlabels(comp);
   }
   return 0;
 }

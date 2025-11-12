@@ -150,7 +150,7 @@ class PPLSimd {
       }
     }
 
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic)
     for (std::size_t i = p; i < paths.size(); ++i) {
       const std::size_t threadId = omp_get_thread_num();
       const std::size_t start = 0;
@@ -159,6 +159,33 @@ class PPLSimd {
       processChain(threadId, FWD, i, 0,
                    std::views::iota(start, end) | std::ranges::views::reverse);
       processChain(threadId, BWD, i, 0, std::views::iota(start, end));
+    }
+  }
+
+  void sortByOrder(const std::vector<Vertex> &order) {
+    assert(order.size() == paths.size());
+
+    std::vector<bool> visited(order.size(), false);
+
+    for (std::size_t i = 0; i < order.size(); ++i) {
+      if (visited[i])
+        continue;
+
+      std::size_t current = i;
+      auto tmp = std::move(paths[i]);
+
+      while (!visited[current]) {
+        visited[current] = true;
+        std::size_t next = order[current];
+
+        if (next == i) {
+          paths[current] = std::move(tmp);
+        } else {
+          paths[current] = std::move(paths[next]);
+        }
+
+        current = next;
+      }
     }
   }
 

@@ -80,7 +80,7 @@ struct PathLabel {
   size_t size() const { return hubs.size(); }
   bool empty() const { return hubs.empty(); }
   void push_back(const PathHub &label) { hubs.push_back(label); }
-  void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
+  void emplace_back(const std::uint16_t path_id, const std::uint16_t path_pos) {
     hubs.emplace_back(path_id, path_pos);
   }
 
@@ -93,8 +93,7 @@ struct PathLabel {
 
   void clear() { hubs.clear(); }
 
-  template <typename Func>
-  auto doForAllHubs(Func &&func) const {
+  template <typename Func> auto doForAllHubs(Func &&func) const {
     for (const auto &hub : hubs) {
       func(hub);
     }
@@ -161,7 +160,7 @@ struct PathLabel {
 //     hubs.push_back(label);
 //   }
 
-//   void emplace_back(const std::uint32_t path_id, const std::uint32_t
+//   void emplace_back(const std::uint16_t path_id, const std::uint16_t
 //   path_pos) {
 //     std::lock_guard<std::mutex> lock(m);
 //     hubs.emplace_back(path_id, path_pos);
@@ -193,9 +192,9 @@ struct PathLabel {
 
 // The thread-safe container now using Spinlock.
 class ThreadSafePathLabel {
- public:
+public:
   std::vector<PathHub> hubs;
-  mutable Spinlock m;  // Use our custom spinlock
+  mutable Spinlock m; // Use our custom spinlock
 
   ThreadSafePathLabel() = default;
 
@@ -271,7 +270,7 @@ class ThreadSafePathLabel {
     hubs.push_back(label);
   }
 
-  void emplace_back(const std::uint32_t path_id, const std::uint32_t path_pos) {
+  void emplace_back(const std::uint16_t path_id, const std::uint16_t path_pos) {
     SpinlockGuard lock(m);
     hubs.emplace_back(path_id, path_pos);
   }
@@ -292,11 +291,10 @@ class ThreadSafePathLabel {
   }
 
   // Applies a function object to every hub.
-  template <typename Func>
-  auto doForAllHubs(Func &&func) const {
+  template <typename Func> auto doForAllHubs(Func &&func) const {
     SpinlockGuard lock(m);
     for (const auto &hub :
-         hubs) {  // Passing by reference may allow modifications.
+         hubs) { // Passing by reference may allow modifications.
       func(hub);
     }
   }
@@ -308,6 +306,12 @@ bool query(const PathLabel &from, const PathLabel &to) {
   const std::size_t tsize = to.size();
 
   while (i < fsize && j < tsize) {
+    if (i + 4 < fsize) {
+      PREFETCH(&from[i + 4]);
+    }
+    if (j + 4 < tsize) {
+      PREFETCH(&to[j + 4]);
+    }
     const auto &srcHub = from[i];
     const auto &tgtHub = to[j];
 
@@ -334,6 +338,12 @@ bool query(const ThreadSafePathLabel &from, const ThreadSafePathLabel &to) {
 
   std::size_t i = 0, j = 0;
   while (i < fsize && j < tsize) {
+    if (i + 4 < fsize) {
+      PREFETCH(&from.hubs[i + 4]);
+    }
+    if (j + 4 < tsize) {
+      PREFETCH(&to.hubs[j + 4]);
+    }
     const auto &srcHub = from.hubs[i];
     const auto &tgtHub = to.hubs[j];
 
@@ -355,36 +365,29 @@ bool query(const ThreadSafePathLabel &from, const ThreadSafePathLabel &to) {
 template <class PATHLABEL_TYPE = PathLabel>
 void benchmark_pathlabels(std::array<std::vector<PATHLABEL_TYPE>, 2> &labels,
                           const std::size_t numQueries = 100000) {
-  using std::chrono::duration;
-  using std::chrono::duration_cast;
-  using std::chrono::high_resolution_clock;
-  using std::chrono::milliseconds;
-
+  using clock = std::chrono::high_resolution_clock;
+  using ns = std::chrono::nanoseconds;
   assert(labels[FWD].size() == labels[BWD].size());
 
   auto queries =
       generateRandomQueries<Vertex>(numQueries, 0, labels[FWD].size());
-  long double totalTime(0);
-  std::size_t counter(0);
+  std::size_t counter = 0;
 
-  auto t1 = high_resolution_clock::now();
-  for (const std::pair<Vertex, Vertex> &paar : queries) {
-    counter += query(labels[FWD][paar.first], labels[BWD][paar.second]);
-  }
-  auto t2 = high_resolution_clock::now();
-  duration<double, std::nano> nano_double = t2 - t1;
-  totalTime += nano_double.count();
+  auto t1 = clock::now();
+  for (const auto &[u, v] : queries)
+    counter += query(labels[FWD][u], labels[BWD][v]);
+  auto t2 = clock::now();
 
-  std::cout << "The " << numQueries << " random queries took in total "
-            << totalTime << " [ns] and on average "
-            << (double)(totalTime / numQueries) << " [ns]! Counter: " << counter
+  double total_ns = std::chrono::duration_cast<ns>(t2 - t1).count();
+  std::cout << numQueries << " queries: total " << total_ns << " ns, avg "
+            << (total_ns / numQueries) << " ns/query, counter=" << counter
             << "\n";
 }
 
 // **** Stats ****
 template <class PATHLABEL_TYPE = PathLabel>
-std::size_t computeTotalBytes(
-    const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
+std::size_t
+computeTotalBytes(const std::array<std::vector<PATHLABEL_TYPE>, 2> &labels) {
   std::size_t totalBytes = 0;
   for (const auto &labelSet : labels) {
     for (const auto &label : labelSet) {
@@ -509,7 +512,8 @@ std::vector<std::vector<Vertex>> loadPathFile(const std::string &fileName) {
   paths.reserve(numPaths);
 
   while (std::getline(inFile, line)) {
-    if (line.empty()) continue;
+    if (line.empty())
+      continue;
 
     std::istringstream lineStream(line);
     std::vector<Vertex> path;
