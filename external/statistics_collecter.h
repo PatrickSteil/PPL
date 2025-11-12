@@ -21,7 +21,7 @@ class StatisticsCollecter {
   StatisticsCollecter(std::vector<std::string> &metricNames)
       : metricNames(metricNames),
         counters(metricNames.size(), 0),
-        numRounds(0) {};
+        numRounds(0){};
 
   // Start a new round of data collection
   void newRound() noexcept { ++numRounds; }
@@ -107,7 +107,7 @@ class FullStatisticsCollecter {
         timersPerPhase(phasesNames.size()),
         totalTimePerPhase(phasesNames.size(), 0),
         totalCallsPerPhase(phasesNames.size(), 0),
-        numRounds(0) {};
+        numRounds(0){};
 
   // Start a new round of data collection
   void newRound() noexcept { ++numRounds; }

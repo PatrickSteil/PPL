@@ -5,6 +5,12 @@
 
 #pragma once
 
+#ifdef __GNUC__
+#define PREFETCH(addr) __builtin_prefetch(addr)
+#else
+#define PREFETCH(addr)
+#endif
+
 #include <array>
 #include <vector>
 
@@ -116,7 +122,7 @@ bool query(const CompressedLabels &compLabels, const Vertex source,
     } else {
       uint16_t fromPathPos = fromPos[i];
       uint16_t toPathPos = toPos[j];
-      if (fromPathPos <= toPathPos) {
+      if (fromPathPos <= toPathPos) [[unlikely]] {
         return true;
       } else {
         ++itT;

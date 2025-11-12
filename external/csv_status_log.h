@@ -1,6 +1,5 @@
 #pragma once
 
-#include "timer.h"
 #include <chrono>
 #include <ctime>
 #include <fstream>
@@ -9,6 +8,8 @@
 #include <map>
 #include <sstream>
 #include <string>
+
+#include "timer.h"
 
 // Helper function to get the current local time as a string.
 std::string get_current_time_string() {
@@ -21,18 +22,19 @@ std::string get_current_time_string() {
 }
 
 class CSVStatusLog {
-public:
+ public:
   // Nested proxy class for metric assignment.
   class MetricProxy {
     CSVStatusLog &log;
     std::string key;
 
-  public:
+   public:
     MetricProxy(CSVStatusLog &logObj, const std::string &k)
         : log(logObj), key(k) {}
 
     // Template operator= to assign any type that supports stream output.
-    template <typename T> MetricProxy &operator=(const T &value) {
+    template <typename T>
+    MetricProxy &operator=(const T &value) {
       std::ostringstream oss;
       oss << value;
       log.metrics[key] = oss.str();
@@ -102,13 +104,13 @@ public:
     }
   }
 
-private:
+ private:
   // Private member variables.
   long long startTime;
   std::string message;
   std::map<std::string, std::string> metrics;
 
-public:
+ public:
   // Call this once at program startup. If filename is empty, logging will be to
   // std::cout.
   static void init(const std::string &filename) {
